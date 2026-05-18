@@ -53,6 +53,7 @@
 #include "core/libraries/razor_cpu/razor_cpu.h"
 #include "core/libraries/remote_play/remoteplay.h"
 #include "core/libraries/rudp/rudp.h"
+#include "core/libraries/rtc/rtc.h"
 #include "core/libraries/save_data/dialog/savedatadialog.h"
 #include "core/libraries/save_data/savedata.h"
 #include "core/libraries/screenshot/screenshot.h"
@@ -121,6 +122,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
     Libraries::PlayGo::RegisterLib(sym);
     Libraries::PlayGo::Dialog::RegisterLib(sym);
     Libraries::Random::RegisterLib(sym);
+    Libraries::Rtc::RegisterLib(sym);
     Libraries::Usbd::RegisterLib(sym);
     Libraries::Pad::RegisterLib(sym);
     Libraries::Ajm::RegisterLib(sym);

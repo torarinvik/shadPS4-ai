@@ -19,6 +19,7 @@
 namespace Core {
 
 using EntryFunc = PS4_SYSV_ABI int (*)(size_t args, const void* argp, void* param);
+using InitArrayFunc = PS4_SYSV_ABI void (*)();
 
 static constexpr u64 ModuleLoadBase = 0x800000000;
 
@@ -97,8 +98,41 @@ Module::~Module() = default;
 
 s32 Module::Start(u64 args, const void* argp, void* param) {
     LOG_INFO(Core_Linker, "Module started : {}", name);
-    const VAddr addr = dynamic_info.init_virtual_addr + GetBaseAddress();
-    return reinterpret_cast<EntryFunc>(addr)(args, argp, param);
+    const auto call_init_array = [this](std::string_view label, VAddr array_virtual_addr,
+                                        u64 array_size) {
+        if (array_virtual_addr == 0 || array_size == 0) {
+            return;
+        }
+        if (array_size % sizeof(VAddr) != 0) {
+            LOG_WARNING(Core_Linker, "{} {} has misaligned init-array size {}", name, label,
+                        array_size);
+        }
+
+        const VAddr array_addr = GetBaseAddress() + array_virtual_addr;
+        const auto* entries = reinterpret_cast<const VAddr*>(array_addr);
+        const u64 count = array_size / sizeof(VAddr);
+        LOG_INFO(Core_Linker, "{} calling {} entries: {}", name, label, count);
+        for (u64 i = 0; i < count; i++) {
+            const VAddr func_addr = entries[i];
+            if (func_addr == 0 || func_addr == static_cast<VAddr>(-1)) {
+                continue;
+            }
+            reinterpret_cast<InitArrayFunc>(func_addr)();
+        }
+    };
+
+    call_init_array("DT_PREINIT_ARRAY", dynamic_info.preinit_array_virtual_addr,
+                    dynamic_info.preinit_array_size);
+
+    s32 ret = 0;
+    if (dynamic_info.init_virtual_addr != 0) {
+        const VAddr addr = dynamic_info.init_virtual_addr + GetBaseAddress();
+        ret = reinterpret_cast<EntryFunc>(addr)(args, argp, param);
+    }
+
+    call_init_array("DT_INIT_ARRAY", dynamic_info.init_array_virtual_addr,
+                    dynamic_info.init_array_size);
+    return ret;
 }
 
 void Module::LoadModuleToMemory(u32& max_tls_index) {

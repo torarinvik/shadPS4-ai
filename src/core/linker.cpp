@@ -23,14 +23,27 @@
 #include "core/tls.h"
 #include "ipc/ipc.h"
 
+#include <cstdlib>
+
 #ifndef _WIN32
 #include <signal.h>
 #endif
 
 namespace Core {
 
+static constexpr u16 ShnUndef = 0;
+
 static PS4_SYSV_ABI void ProgramExitFunc() {
     LOG_ERROR(Core_Linker, "Exit function called");
+}
+
+static PS4_SYSV_ABI int RuntimeLifecycleNoop() {
+    return 0;
+}
+
+static PS4_SYSV_ABI void CompilerRtAbortImpl() {
+    LOG_CRITICAL(Core_Linker, "compilerrt_abort_impl called");
+    std::abort();
 }
 
 #ifdef ARCH_X86_64
@@ -281,6 +294,7 @@ void Linker::Relocate(Module* module) {
                 rel_sym_type = Loader::SymbolType::Object;
                 break;
             case STT_NOTYPE:
+            case STT_SCE:
                 rel_sym_type = Loader::SymbolType::NoType;
                 break;
             default:
@@ -293,12 +307,18 @@ void Linker::Relocate(Module* module) {
 
             switch (sym_bind) {
             case STB_LOCAL:
+                rel_name = names_tlb + sym.st_name;
                 symbol_virtual_addr = rel_base_virtual_addr + sym.st_value;
                 module->SetRelaBit(bit_idx);
                 break;
             case STB_GLOBAL:
             case STB_WEAK: {
                 rel_name = names_tlb + sym.st_name;
+                if (sym.st_shndx != ShnUndef && sym.st_value != 0) {
+                    symbol_virtual_addr = rel_base_virtual_addr + sym.st_value;
+                    module->SetRelaBit(bit_idx);
+                    break;
+                }
                 if (Resolve(rel_name, rel_sym_type, module, &symrec)) {
                     // Only set the rela bit if the symbol was actually resolved and not stubbed.
                     module->SetRelaBit(bit_idx);
@@ -311,7 +331,16 @@ void Linker::Relocate(Module* module) {
             }
             rel_is_resolved = (symbol_virtual_addr != 0);
             rel_value = (rel_is_resolved ? symbol_virtual_addr + addend : 0);
-            rel_name = symrec.name;
+            if (!symrec.name.empty()) {
+                rel_name = symrec.name;
+            }
+            if (!rel_is_resolved) {
+                LOG_WARNING(Core_Linker,
+                            "Relocation unresolved module={} offset={:#x} symbol={} bind={} "
+                            "type={} shndx={} st_value={:#x} reloc_type={:#x}",
+                            module->name, rel->rel_offset, rel_name, sym_bind, sym_type,
+                            sym.st_shndx, sym.st_value, type);
+            }
             break;
         }
         default:
@@ -338,6 +367,24 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
                      Loader::SymbolRecord* return_info) {
     const auto ids = Common::SplitString(name, '#');
     if (ids.size() != 3) {
+        if (name == "module_start" || name == "module_stop") {
+            return_info->virtual_address = reinterpret_cast<VAddr>(&RuntimeLifecycleNoop);
+            return_info->name = name;
+            LOG_INFO(Core_Linker, "Resolved plain runtime symbol {} as lifecycle no-op", name);
+            return true;
+        }
+        if (name == "compilerrt_abort_impl") {
+            return_info->virtual_address = reinterpret_cast<VAddr>(&CompilerRtAbortImpl);
+            return_info->name = name;
+            LOG_INFO(Core_Linker, "Resolved plain runtime symbol {} as abort handler", name);
+            return true;
+        }
+        if (name.starts_with("Need_")) {
+            return_info->virtual_address = reinterpret_cast<VAddr>(&RuntimeLifecycleNoop);
+            return_info->name = name;
+            LOG_INFO(Core_Linker, "Resolved plain dependency marker {} as no-op", name);
+            return true;
+        }
         return_info->virtual_address = 0;
         return_info->name = name;
         LOG_ERROR(Core_Linker, "Not Resolved {}", name);

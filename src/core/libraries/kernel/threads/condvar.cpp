@@ -9,6 +9,7 @@
 #include "core/libraries/kernel/threads/sleepq.h"
 #include "core/libraries/kernel/threads/thread_state.h"
 #include "core/libraries/libs.h"
+#include "core/memory.h"
 
 namespace Libraries::Kernel {
 
@@ -22,7 +23,24 @@ static constexpr PthreadCondAttr PthreadCondattrDefault = {
     .c_clockid = ClockId::Realtime,
 };
 
+template <typename T>
+static T* ResolveGuestPointer(T* pointer) {
+    if (pointer == nullptr) {
+        return nullptr;
+    }
+    const auto resolved =
+        Core::Memory::Instance()->ResolveGuestAddress(reinterpret_cast<VAddr>(pointer));
+    return reinterpret_cast<T*>(resolved);
+}
+
 static int CondInit(PthreadCondT* cond, const PthreadCondAttrT* cond_attr, const char* name) {
+    cond = ResolveGuestPointer(cond);
+    cond_attr = ResolveGuestPointer(cond_attr);
+    name = ResolveGuestPointer(name);
+    if (cond == nullptr) {
+        return POSIX_EINVAL;
+    }
+
     auto* cvp = new (std::nothrow) PthreadCond{};
     if (cvp == nullptr) {
         return POSIX_ENOMEM;
@@ -48,6 +66,10 @@ static int CondInit(PthreadCondT* cond, const PthreadCondAttrT* cond_attr, const
 }
 
 static int InitStatic(Pthread* thread, PthreadCondT* cond) {
+    cond = ResolveGuestPointer(cond);
+    if (cond == nullptr) {
+        return POSIX_EINVAL;
+    }
     std::scoped_lock lk{CondStaticLock};
     if (*cond == nullptr) {
         return CondInit(cond, nullptr, nullptr);
@@ -56,6 +78,10 @@ static int InitStatic(Pthread* thread, PthreadCondT* cond) {
 }
 
 #define CHECK_AND_INIT_COND                                                                        \
+    cond = ResolveGuestPointer(cond);                                                              \
+    if (cond == nullptr) {                                                                         \
+        return POSIX_EINVAL;                                                                       \
+    }                                                                                              \
     if (cvp = *cond; cvp <= THR_COND_DESTROYED) [[unlikely]] {                                     \
         if (cvp == THR_COND_INITIALIZER) {                                                         \
             int ret;                                                                               \
@@ -69,17 +95,29 @@ static int InitStatic(Pthread* thread, PthreadCondT* cond) {
     }
 
 int PS4_SYSV_ABI posix_pthread_cond_init(PthreadCondT* cond, const PthreadCondAttrT* cond_attr) {
+    cond = ResolveGuestPointer(cond);
+    if (cond == nullptr) {
+        return POSIX_EINVAL;
+    }
     *cond = nullptr;
     return CondInit(cond, cond_attr, nullptr);
 }
 
 int PS4_SYSV_ABI scePthreadCondInit(PthreadCondT* cond, const PthreadCondAttrT* cond_attr,
                                     const char* name) {
+    cond = ResolveGuestPointer(cond);
+    if (cond == nullptr) {
+        return POSIX_EINVAL;
+    }
     *cond = nullptr;
     return CondInit(cond, cond_attr, name);
 }
 
 int PS4_SYSV_ABI posix_pthread_cond_destroy(PthreadCondT* cond) {
+    cond = ResolveGuestPointer(cond);
+    if (cond == nullptr) {
+        return POSIX_EINVAL;
+    }
     PthreadCond* cvp = *cond;
     if (cvp == THR_COND_INITIALIZER) {
         return 0;
@@ -94,6 +132,11 @@ int PS4_SYSV_ABI posix_pthread_cond_destroy(PthreadCondT* cond) {
 }
 
 int PthreadCond::Wait(PthreadMutexT* mutex, const OrbisKernelTimespec* abstime, u64 usec) {
+    mutex = ResolveGuestPointer(mutex);
+    abstime = ResolveGuestPointer(abstime);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     PthreadMutex* mp = *mutex;
     if (const int error = mp->IsOwned(g_curthread); error != 0) {
         return error;
@@ -161,6 +204,7 @@ int PS4_SYSV_ABI posix_pthread_cond_wait(PthreadCondT* cond, PthreadMutexT* mute
 
 int PS4_SYSV_ABI posix_pthread_cond_timedwait(PthreadCondT* cond, PthreadMutexT* mutex,
                                               const OrbisKernelTimespec* abstime) {
+    abstime = ResolveGuestPointer(abstime);
     if (abstime == nullptr || abstime->tv_sec < 0 || abstime->tv_nsec < 0 ||
         abstime->tv_nsec >= 1000000000) {
         return POSIX_EINVAL;
@@ -289,6 +333,10 @@ int PS4_SYSV_ABI posix_pthread_cond_broadcast(PthreadCondT* cond) {
 }
 
 int PS4_SYSV_ABI posix_pthread_condattr_init(PthreadCondAttrT* attr) {
+    attr = ResolveGuestPointer(attr);
+    if (attr == nullptr) {
+        return POSIX_EINVAL;
+    }
     auto* pattr = new (std::nothrow) PthreadCondAttr{};
     if (pattr == nullptr) {
         return POSIX_ENOMEM;
@@ -299,6 +347,7 @@ int PS4_SYSV_ABI posix_pthread_condattr_init(PthreadCondAttrT* attr) {
 }
 
 int PS4_SYSV_ABI posix_pthread_condattr_destroy(PthreadCondAttrT* attr) {
+    attr = ResolveGuestPointer(attr);
     if (attr == nullptr || *attr == nullptr) {
         return POSIX_EINVAL;
     }
@@ -308,6 +357,8 @@ int PS4_SYSV_ABI posix_pthread_condattr_destroy(PthreadCondAttrT* attr) {
 }
 
 int PS4_SYSV_ABI posix_pthread_condattr_getclock(const PthreadCondAttrT* attr, ClockId* clock_id) {
+    attr = ResolveGuestPointer(attr);
+    clock_id = ResolveGuestPointer(clock_id);
     if (attr == nullptr || *attr == nullptr) {
         return POSIX_EINVAL;
     }
@@ -316,6 +367,7 @@ int PS4_SYSV_ABI posix_pthread_condattr_getclock(const PthreadCondAttrT* attr, C
 }
 
 int PS4_SYSV_ABI posix_pthread_condattr_setclock(PthreadCondAttrT* attr, ClockId clock_id) {
+    attr = ResolveGuestPointer(attr);
     if (attr == nullptr || *attr == nullptr) {
         return POSIX_EINVAL;
     }
@@ -328,6 +380,8 @@ int PS4_SYSV_ABI posix_pthread_condattr_setclock(PthreadCondAttrT* attr, ClockId
 }
 
 int PS4_SYSV_ABI posix_pthread_condattr_getpshared(const PthreadCondAttrT* attr, int* pshared) {
+    attr = ResolveGuestPointer(attr);
+    pshared = ResolveGuestPointer(pshared);
     if (attr == nullptr || *attr == nullptr) {
         return POSIX_EINVAL;
     }
@@ -336,6 +390,7 @@ int PS4_SYSV_ABI posix_pthread_condattr_getpshared(const PthreadCondAttrT* attr,
 }
 
 int PS4_SYSV_ABI posix_pthread_condattr_setpshared(PthreadCondAttrT* attr, int pshared) {
+    attr = ResolveGuestPointer(attr);
     if (attr == nullptr || *attr == nullptr) {
         return POSIX_EINVAL;
     }

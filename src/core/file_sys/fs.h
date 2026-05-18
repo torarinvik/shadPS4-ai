@@ -100,6 +100,7 @@ enum class FileType {
 struct File {
     std::atomic_bool is_opened{};
     std::atomic<FileType> type{FileType::Regular};
+    std::atomic<s32> open_flags{};
     std::filesystem::path m_host_name;
     std::string m_guest_name;
     Common::FS::IOFile f;

@@ -6,6 +6,7 @@
 #include "common/decoder.h"
 #include "common/signal_context.h"
 #include "core/libraries/kernel/threads/exception.h"
+#include "core/memory.h"
 #include "core/signals.h"
 
 #include <algorithm>
@@ -195,6 +196,18 @@ void SignalHandler(int sig, siginfo_t* info, void* raw_context) {
                             fmt::ptr(code_address), DisassembleInstruction(code_address));
         }
         break;
+    case SIGTRAP:
+#if defined(__APPLE__) && defined(ARCH_X86_64)
+        if (Memory::Instance()->HandleRelocatedSingleStep(raw_context)) {
+            return;
+        }
+#endif
+        if (Libraries::Kernel::Handlers[Libraries::Kernel::NativeToOrbisSignal(sig)]) {
+            Libraries::Kernel::SigactionHandler(sig, info,
+                                                reinterpret_cast<ucontext_t*>(raw_context));
+            return;
+        }
+        break;
     default:
         if (sig == SIGSLEEP) {
             // Sleep thread until signal is received again
@@ -224,6 +237,8 @@ SignalDispatch::SignalDispatch() {
                "Failed to register access violation signal handler.");
     ASSERT_MSG(sigaction(SIGILL, &action, nullptr) == 0,
                "Failed to register illegal instruction signal handler.");
+    ASSERT_MSG(sigaction(SIGTRAP, &action, nullptr) == 0,
+               "Failed to register trap signal handler.");
     ASSERT_MSG(sigaction(SIGSLEEP, &action, nullptr) == 0,
                "Failed to register sleep signal handler.");
 #endif
@@ -243,6 +258,8 @@ SignalDispatch::~SignalDispatch() {
                "Failed to remove access violation signal handler.");
     ASSERT_MSG(sigaction(SIGILL, &action, nullptr) == 0,
                "Failed to remove illegal instruction signal handler.");
+    ASSERT_MSG(sigaction(SIGTRAP, &action, nullptr) == 0,
+               "Failed to remove trap signal handler.");
 #endif
 }
 

@@ -32,6 +32,17 @@ namespace Core {
 #if defined(__APPLE__) && defined(ARCH_X86_64)
 static constexpr VAddr AppleGpuReservedStart = 0x1000000000ULL;
 static constexpr VAddr AppleGpuReservedEnd = 0x7000000000ULL;
+static constexpr u64 X86TrapFlag = 0x100;
+
+struct RelocatedRegisterRestore {
+    bool active{};
+    bool had_trap_flag{};
+    ZydisRegister reg{ZYDIS_REGISTER_NONE};
+    u64 value{};
+    const char* name{};
+};
+
+static thread_local RelocatedRegisterRestore relocated_register_restore;
 #endif
 
 static bool RelocatedAccessViolationHandler(void* context, void* fault_address) {
@@ -1631,6 +1642,11 @@ VAddr MemoryManager::ResolveRelocatedAddress(VAddr virtual_addr) const {
     return virtual_addr;
 }
 
+VAddr MemoryManager::ResolveGuestAddress(VAddr virtual_addr) {
+    std::shared_lock lk{mutex};
+    return ResolveRelocatedAddress(virtual_addr);
+}
+
 bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_address) {
 #if defined(__APPLE__) && defined(ARCH_X86_64)
     const auto fault_addr = reinterpret_cast<VAddr>(fault_address);
@@ -1740,6 +1756,14 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
             *slot = old_value;
             return false;
         }
+        relocated_register_restore = RelocatedRegisterRestore{
+            .active = true,
+            .had_trap_flag = (state.__rflags & X86TrapFlag) != 0,
+            .reg = reg,
+            .value = old_value,
+            .name = name,
+        };
+        state.__rflags |= X86TrapFlag;
         LOG_TRACE(Kernel_Vmm,
                   "Patched {} from relocated guest pointer {:#x} to host-mapped address {:#x} "
                   "for fault at {:#x} -> {:#x}",
@@ -1772,6 +1796,14 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
             *slot = old_value;
             return false;
         }
+        relocated_register_restore = RelocatedRegisterRestore{
+            .active = true,
+            .had_trap_flag = (state.__rflags & X86TrapFlag) != 0,
+            .reg = reg,
+            .value = old_value,
+            .name = name,
+        };
+        state.__rflags |= X86TrapFlag;
         LOG_TRACE(Kernel_Vmm,
                   "Adjusted {} by relocation delta {:#x}: {:#x} -> {:#x} for fault at {:#x} -> "
                   "{:#x}",
@@ -1842,6 +1874,88 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
     }
 
     return false;
+#else
+    return false;
+#endif
+}
+
+bool MemoryManager::HandleRelocatedSingleStep(void* context) {
+#if defined(__APPLE__) && defined(ARCH_X86_64)
+    if (!relocated_register_restore.active) {
+        return false;
+    }
+
+    auto& state = reinterpret_cast<ucontext_t*>(context)->uc_mcontext->__ss;
+    const auto register_slot = [&](ZydisRegister reg) -> u64* {
+        switch (reg) {
+        case ZYDIS_REGISTER_RAX:
+        case ZYDIS_REGISTER_EAX:
+            return &state.__rax;
+        case ZYDIS_REGISTER_RBX:
+        case ZYDIS_REGISTER_EBX:
+            return &state.__rbx;
+        case ZYDIS_REGISTER_RCX:
+        case ZYDIS_REGISTER_ECX:
+            return &state.__rcx;
+        case ZYDIS_REGISTER_RDX:
+        case ZYDIS_REGISTER_EDX:
+            return &state.__rdx;
+        case ZYDIS_REGISTER_RDI:
+        case ZYDIS_REGISTER_EDI:
+            return &state.__rdi;
+        case ZYDIS_REGISTER_RSI:
+        case ZYDIS_REGISTER_ESI:
+            return &state.__rsi;
+        case ZYDIS_REGISTER_RBP:
+        case ZYDIS_REGISTER_EBP:
+            return &state.__rbp;
+        case ZYDIS_REGISTER_RSP:
+        case ZYDIS_REGISTER_ESP:
+            return &state.__rsp;
+        case ZYDIS_REGISTER_R8:
+        case ZYDIS_REGISTER_R8D:
+            return &state.__r8;
+        case ZYDIS_REGISTER_R9:
+        case ZYDIS_REGISTER_R9D:
+            return &state.__r9;
+        case ZYDIS_REGISTER_R10:
+        case ZYDIS_REGISTER_R10D:
+            return &state.__r10;
+        case ZYDIS_REGISTER_R11:
+        case ZYDIS_REGISTER_R11D:
+            return &state.__r11;
+        case ZYDIS_REGISTER_R12:
+        case ZYDIS_REGISTER_R12D:
+            return &state.__r12;
+        case ZYDIS_REGISTER_R13:
+        case ZYDIS_REGISTER_R13D:
+            return &state.__r13;
+        case ZYDIS_REGISTER_R14:
+        case ZYDIS_REGISTER_R14D:
+            return &state.__r14;
+        case ZYDIS_REGISTER_R15:
+        case ZYDIS_REGISTER_R15D:
+            return &state.__r15;
+        default:
+            return nullptr;
+        }
+    };
+
+    const auto restore = relocated_register_restore;
+    relocated_register_restore = {};
+
+    if (auto* slot = register_slot(restore.reg)) {
+        const auto patched_value = *slot;
+        *slot = restore.value;
+        LOG_TRACE(Kernel_Vmm, "Restored {} after relocated single-step: {:#x} -> {:#x}",
+                  restore.name != nullptr ? restore.name : "register", patched_value,
+                  restore.value);
+    }
+
+    if (!restore.had_trap_flag) {
+        state.__rflags &= ~X86TrapFlag;
+    }
+    return true;
 #else
     return false;
 #endif

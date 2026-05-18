@@ -37,7 +37,9 @@
 #else
 #include <sys/select.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
+#include <utime.h>
 #endif
 
 namespace D = Core::Devices;
@@ -77,6 +79,12 @@ static std::map<std::string, FactoryDevice> available_device = {
 
 namespace Libraries::Kernel {
 
+static constexpr s32 OrbisFdupfd = 0;
+static constexpr s32 OrbisFgetfd = 1;
+static constexpr s32 OrbisFsetfd = 2;
+static constexpr s32 OrbisFgetfl = 3;
+static constexpr s32 OrbisFsetfl = 4;
+
 static bool TracePakIoEnabled() {
     static const bool enabled = std::getenv("SHADPS4_TRACE_PAK_IO") != nullptr;
     return enabled;
@@ -84,6 +92,19 @@ static bool TracePakIoEnabled() {
 
 static bool ShouldTracePakIo(const Core::FileSys::File* file) {
     return TracePakIoEnabled() && file != nullptr && file->m_guest_name.ends_with(".pak");
+}
+
+static bool TracePathIoEnabled() {
+    static const bool enabled = std::getenv("SHADPS4_TRACE_PATH_IO") != nullptr;
+    return enabled;
+}
+
+static bool ShouldTracePathIo(std::string_view path) {
+    return TracePathIoEnabled() && path.find("/data/") != std::string_view::npos;
+}
+
+static bool ShouldTracePathIo(const Core::FileSys::File* file) {
+    return file != nullptr && ShouldTracePathIo(file->m_guest_name);
 }
 
 s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
@@ -127,6 +148,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
     std::string_view path{raw_path};
     u32 handle = h->CreateHandle();
     auto* file = h->GetFile(handle);
+    file->open_flags = flags;
 
     if (path.starts_with("/dev/")) {
         for (const auto& [prefix, factory] : available_device) {
@@ -273,6 +295,10 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
     }
 
     file->is_opened = true;
+    if (ShouldTracePathIo(file)) {
+        LOG_INFO(Kernel_Fs, "TRACE_PATH_IO open fd={} guest={} host={} flags={:#x} mode={:#o}",
+                 handle, file->m_guest_name, file->m_host_name.string(), flags, mode);
+    }
     return handle;
 }
 
@@ -317,6 +343,84 @@ s32 PS4_SYSV_ABI posix_close(s32 fd) {
 
 s32 PS4_SYSV_ABI sceKernelClose(s32 fd) {
     s32 result = close(fd);
+    if (result < 0) {
+        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        return ErrnoToSceKernelError(*__Error());
+    }
+    return result;
+}
+
+s32 PS4_SYSV_ABI fcntl(s32 fd, s32 cmd, s64 arg) {
+    auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
+    auto* file = h->GetFile(fd);
+    if (file == nullptr || !file->is_opened) {
+        *__Error() = POSIX_EBADF;
+        return -1;
+    }
+
+    switch (cmd) {
+    case OrbisFdupfd: {
+        auto* new_file = h->GetFile(h->CreateHandle());
+        new_file->is_opened = file->is_opened.load();
+        new_file->type = file->type.load();
+        new_file->open_flags = file->open_flags.load();
+        new_file->m_host_name = file->m_host_name;
+        new_file->m_guest_name = file->m_guest_name;
+        new_file->directory = file->directory;
+        new_file->device = file->device;
+        new_file->socket = file->socket;
+        new_file->epoll = file->epoll;
+        new_file->resolver = file->resolver;
+        if (new_file->type == Core::FileSys::FileType::Regular) {
+            const auto pos = file->f.Tell();
+            const auto access_mode = [&] {
+                const s32 flags = file->open_flags.load();
+                const bool append = (flags & ORBIS_KERNEL_O_APPEND) != 0;
+                switch (flags & 0x3) {
+                case ORBIS_KERNEL_O_WRONLY:
+                    return append ? Common::FS::FileAccessMode::Append
+                                  : Common::FS::FileAccessMode::Write;
+                case ORBIS_KERNEL_O_RDWR:
+                    return append ? Common::FS::FileAccessMode::ReadAppend
+                                  : Common::FS::FileAccessMode::ReadWrite;
+                case ORBIS_KERNEL_O_RDONLY:
+                default:
+                    return Common::FS::FileAccessMode::Read;
+                }
+            }();
+            const s32 error = new_file->f.Open(new_file->m_host_name, access_mode);
+            if (error != 0) {
+                h->DeleteHandle(h->GetFileDescriptor(new_file));
+                SetPosixErrno(error);
+                return -1;
+            }
+            new_file->f.Seek(pos);
+        }
+        return h->GetFileDescriptor(new_file);
+    }
+    case OrbisFgetfd:
+        return 0;
+    case OrbisFsetfd:
+        return 0;
+    case OrbisFgetfl:
+        return file->open_flags.load();
+    case OrbisFsetfl:
+        file->open_flags = (file->open_flags.load() & 0x3) | (static_cast<s32>(arg) & ~0x3);
+        return 0;
+    default:
+        LOG_WARNING(Kernel_Fs, "(PARTIAL) unsupported fcntl fd={} cmd={:#x} arg={:#x}", fd, cmd,
+                    arg);
+        *__Error() = POSIX_EINVAL;
+        return -1;
+    }
+}
+
+s32 PS4_SYSV_ABI posix_fcntl(s32 fd, s32 cmd, s64 arg) {
+    return fcntl(fd, cmd, arg);
+}
+
+s32 PS4_SYSV_ABI sceKernelFcntl(s32 fd, s32 cmd, s64 arg) {
+    const s32 result = fcntl(fd, cmd, arg);
     if (result < 0) {
         LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
         return ErrnoToSceKernelError(*__Error());
@@ -592,6 +696,10 @@ s64 PS4_SYSV_ABI read(s32 fd, void* buf, u64 nbytes) {
         LOG_INFO(Kernel_Fs, "pak read: fd={} path={} pos={} requested={} bytes={}", fd,
                  file->m_guest_name, start_pos, nbytes, result);
     }
+    if (ShouldTracePathIo(file)) {
+        LOG_INFO(Kernel_Fs, "TRACE_PATH_IO read fd={} guest={} dst={} requested={} bytes={}", fd,
+                 file->m_guest_name, fmt::ptr(buf), nbytes, result);
+    }
     return result;
 }
 
@@ -636,6 +744,10 @@ s64 ReadHostBuffer(s32 fd, void* buf, u64 nbytes) {
     if (ShouldTracePakIo(file)) {
         LOG_INFO(Kernel_Fs, "pak host read: fd={} path={} pos={} requested={} bytes={}", fd,
                  file->m_guest_name, start_pos, nbytes, result);
+    }
+    if (ShouldTracePathIo(file)) {
+        LOG_INFO(Kernel_Fs, "TRACE_PATH_IO host_read fd={} guest={} dst={} requested={} bytes={}",
+                 fd, file->m_guest_name, fmt::ptr(buf), nbytes, result);
     }
     return result;
 }
@@ -734,6 +846,121 @@ s32 PS4_SYSV_ABI posix_rmdir(const char* path) {
 
 s32 PS4_SYSV_ABI sceKernelRmdir(const char* path) {
     s32 result = posix_rmdir(path);
+    if (result < 0) {
+        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        return ErrnoToSceKernelError(*__Error());
+    }
+    return result;
+}
+
+static s32 PosixPathWriteGuard(const char* path, fs::path* host_path) {
+    if (path == nullptr) {
+        *__Error() = POSIX_EFAULT;
+        return -1;
+    }
+    if (strlen(path) > 255) {
+        *__Error() = POSIX_ENAMETOOLONG;
+        return -1;
+    }
+    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    bool ro = false;
+    *host_path = mnt->GetHostPath(path, &ro);
+    if (ro) {
+        *__Error() = POSIX_EROFS;
+        return -1;
+    }
+    if (!fs::exists(*host_path)) {
+        *__Error() = POSIX_ENOENT;
+        return -1;
+    }
+    return ORBIS_OK;
+}
+
+s32 PS4_SYSV_ABI posix_truncate(const char* path, s64 length) {
+    LOG_DEBUG(Kernel_Fs, "(PARTIAL) path = {} length = {}", path, length);
+    if (length < 0) {
+        *__Error() = POSIX_EINVAL;
+        return -1;
+    }
+    fs::path host_path;
+    if (PosixPathWriteGuard(path, &host_path) < 0) {
+        return -1;
+    }
+    if (fs::is_directory(host_path)) {
+        *__Error() = POSIX_EISDIR;
+        return -1;
+    }
+    Common::FS::IOFile file(host_path, Common::FS::FileAccessMode::ReadWrite);
+    if (!file.IsOpen() || !file.SetSize(length)) {
+        *__Error() = POSIX_EIO;
+        return -1;
+    }
+    return ORBIS_OK;
+}
+
+s32 PS4_SYSV_ABI sceKernelTruncate(const char* path, s64 length) {
+    const s32 result = posix_truncate(path, length);
+    if (result < 0) {
+        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        return ErrnoToSceKernelError(*__Error());
+    }
+    return result;
+}
+
+s32 PS4_SYSV_ABI posix_chmod(const char* path, u16 mode) {
+    LOG_DEBUG(Kernel_Fs, "(PARTIAL) path = {} mode = {:#o}", path, mode);
+    fs::path host_path;
+    if (PosixPathWriteGuard(path, &host_path) < 0) {
+        return -1;
+    }
+#ifndef _WIN32
+    if (::chmod(host_path.c_str(), mode) != 0) {
+        SetPosixErrno(errno);
+        return -1;
+    }
+#endif
+    return ORBIS_OK;
+}
+
+s32 PS4_SYSV_ABI sceKernelChmod(const char* path, u16 mode) {
+    const s32 result = posix_chmod(path, mode);
+    if (result < 0) {
+        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        return ErrnoToSceKernelError(*__Error());
+    }
+    return result;
+}
+
+s32 PS4_SYSV_ABI posix_utimes(const char* path, const OrbisKernelTimeval* times) {
+    LOG_DEBUG(Kernel_Fs, "(PARTIAL) path = {}", path);
+    fs::path host_path;
+    if (PosixPathWriteGuard(path, &host_path) < 0) {
+        return -1;
+    }
+#ifndef _WIN32
+    if (times == nullptr) {
+        if (::utimes(host_path.c_str(), nullptr) != 0) {
+            SetPosixErrno(errno);
+            return -1;
+        }
+        return ORBIS_OK;
+    }
+
+    timeval host_times[2]{};
+    host_times[0].tv_sec = times[0].tv_sec;
+    host_times[0].tv_usec = times[0].tv_usec;
+    host_times[1].tv_sec = times[1].tv_sec;
+    host_times[1].tv_usec = times[1].tv_usec;
+    if (::utimes(host_path.c_str(), host_times) != 0) {
+        SetPosixErrno(errno);
+        return -1;
+    }
+#endif
+    return ORBIS_OK;
+}
+
+s32 PS4_SYSV_ABI sceKernelUtimes(const char* path, const OrbisKernelTimeval* times) {
+    const s32 result = posix_utimes(path, times);
     if (result < 0) {
         LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
         return ErrnoToSceKernelError(*__Error());
@@ -1060,6 +1287,13 @@ s64 PS4_SYSV_ABI posix_preadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 off
                           fd, file->m_guest_name, offset + total_read, i, iov[i].iov_len,
                           *__Error());
             }
+            if (ShouldTracePathIo(file)) {
+                LOG_ERROR(Kernel_Fs,
+                          "TRACE_PATH_IO preadv_failed fd={} guest={} offset={} iov={} "
+                          "requested={} errno={}",
+                          fd, file->m_guest_name, offset + total_read, i, iov[i].iov_len,
+                          *__Error());
+            }
             return total_read > 0 ? total_read : -1;
         }
         if (result == 0) {
@@ -1071,6 +1305,11 @@ s64 PS4_SYSV_ABI posix_preadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 off
                 LOG_ERROR(Kernel_Fs,
                           "pak preadv guest write failed: fd={} path={} dst={} bytes={}", fd,
                           file->m_guest_name, iov[i].iov_base, result);
+            }
+            if (ShouldTracePathIo(file)) {
+                LOG_ERROR(Kernel_Fs,
+                          "TRACE_PATH_IO preadv_guest_write_failed fd={} guest={} dst={} bytes={}",
+                          fd, file->m_guest_name, fmt::ptr(iov[i].iov_base), result);
             }
             return total_read > 0 ? total_read : -1;
         }
@@ -1086,6 +1325,15 @@ s64 PS4_SYSV_ABI posix_preadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 off
             requested_read += iov[i].iov_len;
         }
         LOG_INFO(Kernel_Fs, "pak preadv: fd={} path={} offset={} iovcnt={} requested={} bytes={}",
+                 fd, file->m_guest_name, offset, iovcnt, requested_read, total_read);
+    }
+    if (ShouldTracePathIo(file)) {
+        u64 requested_read = 0;
+        for (s32 i = 0; i < iovcnt; i++) {
+            requested_read += iov[i].iov_len;
+        }
+        LOG_INFO(Kernel_Fs,
+                 "TRACE_PATH_IO preadv fd={} guest={} offset={} iovcnt={} requested={} bytes={}",
                  fd, file->m_guest_name, offset, iovcnt, requested_read, total_read);
     }
     return total_read;
@@ -1107,6 +1355,11 @@ s64 PS4_SYSV_ABI posix_preadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 off
     if (ShouldTracePakIo(file)) {
         LOG_INFO(Kernel_Fs, "pak preadv: fd={} path={} offset={} iovcnt={} requested={} bytes={}", fd,
                  file->m_guest_name, offset, iovcnt, requested_read, total_read);
+    }
+    if (ShouldTracePathIo(file)) {
+        LOG_INFO(Kernel_Fs,
+                 "TRACE_PATH_IO preadv fd={} guest={} offset={} iovcnt={} requested={} bytes={}",
+                 fd, file->m_guest_name, offset, iovcnt, requested_read, total_read);
     }
     return total_read;
 #endif
@@ -1650,6 +1903,7 @@ void RegisterFileSystem(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("bY-PO6JhzhQ", "libScePosix", 1, "libkernel", posix_close);
     LIB_FUNCTION("bY-PO6JhzhQ", "libkernel", 1, "libkernel", posix_close);
     LIB_FUNCTION("UK2Tl2DWUns", "libkernel", 1, "libkernel", sceKernelClose);
+    LIB_FUNCTION("SoZkxZkCHaw", "libkernel", 1, "libkernel", sceKernelFcntl);
     LIB_FUNCTION("FxVZqBAA7ks", "libkernel", 1, "libkernel", write);
     LIB_FUNCTION("FN4gaPmuFV8", "libScePosix", 1, "libkernel", posix_write);
     LIB_FUNCTION("FN4gaPmuFV8", "libkernel", 1, "libkernel", posix_write);
@@ -1679,6 +1933,9 @@ void RegisterFileSystem(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("kBwCPsYX-m4", "libkernel", 1, "libkernel", sceKernelFstat);
     LIB_FUNCTION("ih4CD9-gghM", "libkernel", 1, "libkernel", posix_ftruncate);
     LIB_FUNCTION("VW3TVZiM4-E", "libkernel", 1, "libkernel", sceKernelFtruncate);
+    LIB_FUNCTION("WlyEA-sLDf0", "libkernel", 1, "libkernel", sceKernelTruncate);
+    LIB_FUNCTION("fgIsQ10xYVA", "libkernel", 1, "libkernel", sceKernelChmod);
+    LIB_FUNCTION("0Cq8ipKr9n0", "libkernel", 1, "libkernel", sceKernelUtimes);
     LIB_FUNCTION("NN01qLRhiqU", "libScePosix", 1, "libkernel", posix_rename);
     LIB_FUNCTION("NN01qLRhiqU", "libkernel", 1, "libkernel", posix_rename);
     LIB_FUNCTION("52NcYU9+lEo", "libkernel", 1, "libkernel", sceKernelRename);

@@ -7,6 +7,7 @@
 #include "core/libraries/kernel/process.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/libs.h"
+#include "core/memory.h"
 
 namespace Libraries::Kernel {
 
@@ -16,7 +17,21 @@ static s32 sdk_version;
 #define THR_RWLOCK_INITIALIZER ((PthreadRwlock*)NULL)
 #define THR_RWLOCK_DESTROYED ((PthreadRwlock*)1)
 
+template <typename T>
+static T* ResolveGuestPointer(T* pointer) {
+    if (pointer == nullptr) {
+        return nullptr;
+    }
+    const auto resolved =
+        Core::Memory::Instance()->ResolveGuestAddress(reinterpret_cast<VAddr>(pointer));
+    return reinterpret_cast<T*>(resolved);
+}
+
 #define CHECK_AND_INIT_RWLOCK                                                                      \
+    rwlock = ResolveGuestPointer(rwlock);                                                          \
+    if (rwlock == nullptr) {                                                                       \
+        return POSIX_EINVAL;                                                                       \
+    }                                                                                              \
     if (prwlock = (*rwlock); prwlock <= THR_RWLOCK_DESTROYED) [[unlikely]] {                       \
         if (prwlock == THR_RWLOCK_INITIALIZER) {                                                   \
             int ret;                                                                               \
@@ -30,6 +45,11 @@ static s32 sdk_version;
     }
 
 static int RwlockInit(PthreadRwlockT* rwlock, const PthreadRwlockAttrT* attr) {
+    rwlock = ResolveGuestPointer(rwlock);
+    attr = ResolveGuestPointer(attr);
+    if (rwlock == nullptr) {
+        return POSIX_EINVAL;
+    }
     auto* prwlock = new (std::nothrow) PthreadRwlock{};
     if (prwlock == nullptr) {
         return POSIX_ENOMEM;
@@ -45,6 +65,10 @@ static int RwlockInit(PthreadRwlockT* rwlock, const PthreadRwlockAttrT* attr) {
 }
 
 int PS4_SYSV_ABI posix_pthread_rwlock_destroy(PthreadRwlockT* rwlock) {
+    rwlock = ResolveGuestPointer(rwlock);
+    if (rwlock == nullptr) {
+        return POSIX_EINVAL;
+    }
     PthreadRwlockT prwlock = *rwlock;
     if (prwlock == THR_RWLOCK_INITIALIZER) {
         return 0;
@@ -58,6 +82,10 @@ int PS4_SYSV_ABI posix_pthread_rwlock_destroy(PthreadRwlockT* rwlock) {
 }
 
 static int InitStatic(Pthread* thread, PthreadRwlockT* rwlock) {
+    rwlock = ResolveGuestPointer(rwlock);
+    if (rwlock == nullptr) {
+        return POSIX_EINVAL;
+    }
     std::scoped_lock lk{RwlockStaticLock};
     if (*rwlock == THR_RWLOCK_INITIALIZER) {
         auto* prwlock = new (std::nothrow) PthreadRwlock{};
@@ -70,6 +98,10 @@ static int InitStatic(Pthread* thread, PthreadRwlockT* rwlock) {
 }
 
 int PS4_SYSV_ABI posix_pthread_rwlock_init(PthreadRwlockT* rwlock, const PthreadRwlockAttrT* attr) {
+    rwlock = ResolveGuestPointer(rwlock);
+    if (rwlock == nullptr) {
+        return POSIX_EINVAL;
+    }
     *rwlock = nullptr;
     return RwlockInit(rwlock, attr);
 }
@@ -139,6 +171,7 @@ int PS4_SYSV_ABI posix_pthread_rwlock_rdlock(PthreadRwlockT* rwlock) {
 
 int PS4_SYSV_ABI posix_pthread_rwlock_timedrdlock(PthreadRwlockT* rwlock,
                                                   const OrbisKernelTimespec* abstime) {
+    abstime = ResolveGuestPointer(abstime);
     PthreadRwlockT prwlock{};
     CHECK_AND_INIT_RWLOCK
     return prwlock->Rdlock(abstime);
@@ -177,12 +210,17 @@ int PS4_SYSV_ABI posix_pthread_rwlock_wrlock(PthreadRwlockT* rwlock) {
 
 int PS4_SYSV_ABI posix_pthread_rwlock_timedwrlock(PthreadRwlockT* rwlock,
                                                   const OrbisKernelTimespec* abstime) {
+    abstime = ResolveGuestPointer(abstime);
     PthreadRwlockT prwlock{};
     CHECK_AND_INIT_RWLOCK
     return prwlock->Wrlock(abstime);
 }
 
 int PS4_SYSV_ABI posix_pthread_rwlock_unlock(PthreadRwlockT* rwlock) {
+    rwlock = ResolveGuestPointer(rwlock);
+    if (rwlock == nullptr) {
+        return POSIX_EINVAL;
+    }
     Pthread* curthread = g_curthread;
     PthreadRwlockT prwlock = *rwlock;
     if (prwlock <= THR_RWLOCK_DESTROYED) [[unlikely]] {
@@ -203,6 +241,7 @@ int PS4_SYSV_ABI posix_pthread_rwlock_unlock(PthreadRwlockT* rwlock) {
 }
 
 int PS4_SYSV_ABI posix_pthread_rwlockattr_destroy(PthreadRwlockAttrT* rwlockattr) {
+    rwlockattr = ResolveGuestPointer(rwlockattr);
     if (rwlockattr == nullptr) {
         return POSIX_EINVAL;
     }
@@ -217,13 +256,21 @@ int PS4_SYSV_ABI posix_pthread_rwlockattr_destroy(PthreadRwlockAttrT* rwlockattr
 
 int PS4_SYSV_ABI posix_pthread_rwlockattr_getpshared(const PthreadRwlockAttrT* rwlockattr,
                                                      int* pshared) {
+    rwlockattr = ResolveGuestPointer(rwlockattr);
+    pshared = ResolveGuestPointer(pshared);
+    if (rwlockattr == nullptr || *rwlockattr == nullptr || pshared == nullptr) {
+        return POSIX_EINVAL;
+    }
     *pshared = (*rwlockattr)->pshared;
     return 0;
 }
 
 int PS4_SYSV_ABI posix_pthread_rwlockattr_gettype_np(const PthreadRwlockAttrT* rwlockattr,
                                                      int* type) {
-    if (rwlockattr == nullptr || *rwlockattr == nullptr || (*rwlockattr)->type > 2) {
+    rwlockattr = ResolveGuestPointer(rwlockattr);
+    type = ResolveGuestPointer(type);
+    if (rwlockattr == nullptr || *rwlockattr == nullptr || type == nullptr ||
+        (*rwlockattr)->type > 2) {
         return POSIX_EINVAL;
     }
     *type = (*rwlockattr)->type;
@@ -231,6 +278,7 @@ int PS4_SYSV_ABI posix_pthread_rwlockattr_gettype_np(const PthreadRwlockAttrT* r
 }
 
 int PS4_SYSV_ABI posix_pthread_rwlockattr_init(PthreadRwlockAttrT* rwlockattr) {
+    rwlockattr = ResolveGuestPointer(rwlockattr);
     if (rwlockattr == nullptr) {
         return POSIX_EINVAL;
     }
@@ -247,6 +295,7 @@ int PS4_SYSV_ABI posix_pthread_rwlockattr_init(PthreadRwlockAttrT* rwlockattr) {
 
 int PS4_SYSV_ABI posix_pthread_rwlockattr_settype_np(const PthreadRwlockAttrT* rwlockattr,
                                                      int type) {
+    rwlockattr = ResolveGuestPointer(rwlockattr);
     if (rwlockattr == nullptr || *rwlockattr == nullptr || (*rwlockattr)->type > 2) {
         return POSIX_EINVAL;
     }
@@ -255,6 +304,10 @@ int PS4_SYSV_ABI posix_pthread_rwlockattr_settype_np(const PthreadRwlockAttrT* r
 }
 
 int PS4_SYSV_ABI posix_pthread_rwlockattr_setpshared(PthreadRwlockAttrT* rwlockattr, int pshared) {
+    rwlockattr = ResolveGuestPointer(rwlockattr);
+    if (rwlockattr == nullptr || *rwlockattr == nullptr) {
+        return POSIX_EINVAL;
+    }
     /* Only PTHREAD_PROCESS_PRIVATE is supported. */
     if (pshared != 0) {
         return POSIX_EINVAL;

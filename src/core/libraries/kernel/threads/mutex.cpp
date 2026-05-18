@@ -8,6 +8,7 @@
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/libs.h"
+#include "core/memory.h"
 
 namespace Libraries::Kernel {
 
@@ -39,7 +40,20 @@ static constexpr PthreadMutexAttr PthreadMutexattrAdaptiveDefault = {
 
 using CallocFun = void* (*)(size_t, size_t);
 
+static PthreadMutexT* ResolveMutexSlot(PthreadMutexT* mutex) {
+    if (mutex == nullptr) {
+        return nullptr;
+    }
+    const auto resolved =
+        Core::Memory::Instance()->ResolveGuestAddress(reinterpret_cast<VAddr>(mutex));
+    return reinterpret_cast<PthreadMutexT*>(resolved);
+}
+
 static s32 MutexInit(PthreadMutexT* mutex, const PthreadMutexAttr* mutex_attr, const char* name) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     const PthreadMutexAttr* attr;
     if (mutex_attr == nullptr) {
         attr = &PthreadMutexattrDefault;
@@ -101,6 +115,10 @@ s32 PS4_SYSV_ABI scePthreadMutexInit(PthreadMutexT* mutex, const PthreadMutexAtt
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_destroy(PthreadMutexT* mutex) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     PthreadMutexT m = *mutex;
     if (m < THR_MUTEX_DESTROYED) {
         return 0;
@@ -249,22 +267,38 @@ s32 PthreadMutex::TryLock() {
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_trylock(PthreadMutexT* mutex) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     CHECK_AND_INIT_MUTEX
     return (*mutex)->TryLock();
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_lock(PthreadMutexT* mutex) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     CHECK_AND_INIT_MUTEX
     return (*mutex)->Lock(nullptr);
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_timedlock(PthreadMutexT* mutex,
                                                const OrbisKernelTimespec* abstime) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     CHECK_AND_INIT_MUTEX
     return (*mutex)->Lock(abstime);
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_reltimedlock_np(PthreadMutexT* mutex, u64 usec) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     CHECK_AND_INIT_MUTEX
     return (*mutex)->Lock(THR_RELTIME, usec);
 }
@@ -295,6 +329,10 @@ s32 PthreadMutex::Unlock() {
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_unlock(PthreadMutexT* mutex) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     PthreadMutex* mp = *mutex;
     if (mp <= THR_MUTEX_DESTROYED) [[unlikely]] {
         if (mp == THR_MUTEX_DESTROYED) {
@@ -306,28 +344,48 @@ s32 PS4_SYSV_ABI posix_pthread_mutex_unlock(PthreadMutexT* mutex) {
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_getspinloops_np(PthreadMutexT* mutex, int* count) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     CHECK_AND_INIT_MUTEX
     *count = (*mutex)->m_spinloops;
     return 0;
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_setspinloops_np(PthreadMutexT* mutex, s32 count) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     CHECK_AND_INIT_MUTEX(*mutex)->m_spinloops = count;
     return 0;
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_getyieldloops_np(PthreadMutexT* mutex, int* count) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     CHECK_AND_INIT_MUTEX
     *count = (*mutex)->m_yieldloops;
     return 0;
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_setyieldloops_np(PthreadMutexT* mutex, s32 count) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return POSIX_EINVAL;
+    }
     CHECK_AND_INIT_MUTEX(*mutex)->m_yieldloops = count;
     return 0;
 }
 
 s32 PS4_SYSV_ABI posix_pthread_mutex_isowned_np(PthreadMutexT* mutex) {
+    mutex = ResolveMutexSlot(mutex);
+    if (mutex == nullptr) {
+        return 0;
+    }
     PthreadMutex* m = *mutex;
     if (m <= THR_MUTEX_DESTROYED) {
         return 0;

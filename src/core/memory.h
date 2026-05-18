@@ -305,7 +305,11 @@ public:
 
     void InvalidateMemory(VAddr addr, u64 size) const;
 
+    VAddr ResolveGuestAddress(VAddr virtual_addr);
+
     bool HandleRelocatedAccessFault(void* context, void* fault_address);
+
+    bool HandleRelocatedSingleStep(void* context);
 
 private:
     VMAHandle FindVMA(VAddr target) {

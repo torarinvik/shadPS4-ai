@@ -10,6 +10,8 @@
 #include "core/libraries/libs.h"
 #include "core/linker.h"
 
+#include <cstring>
+
 namespace Libraries::Kernel {
 
 s32 PS4_SYSV_ABI sceKernelIsInSandbox() {
@@ -109,6 +111,15 @@ s32 PS4_SYSV_ABI sceKernelLoadStartModule(const char* moduleFileName, u64 args, 
     }
 
     return ORBIS_KERNEL_ERROR_ENOENT;
+}
+
+s32 PS4_SYSV_ABI sceKernelStopUnloadModule(s32 handle, u64 args, const void* argp, u32 flags,
+                                           const void* pOpt, s32* pRes) {
+    LOG_INFO(Lib_Kernel, "(STUBBED) handle = {}, args = {}, flags = {:#x}", handle, args, flags);
+    if (pRes != nullptr) {
+        *pRes = ORBIS_OK;
+    }
+    return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceKernelDlsym(s32 handle, const char* symbol, void** addrp) {
@@ -283,6 +294,56 @@ u32 PS4_SYSV_ABI posix_getuid() {
     return 1;
 }
 
+s32 PS4_SYSV_ABI posix_getrusage(s32 who, void* usage) {
+    LOG_DEBUG(Lib_Kernel, "(PARTIAL) who = {}", who);
+    if (usage == nullptr) {
+        return -1;
+    }
+    // The guest structure is larger than the fields most titles query; a conservative zeroed
+    // snapshot is safer than the AeroLib stub returning success without touching memory.
+    std::memset(usage, 0, 256);
+    return 0;
+}
+
+using SignalHandler = void (*)(s32);
+
+SignalHandler PS4_SYSV_ABI posix_signal(s32 signum, SignalHandler handler) {
+    LOG_DEBUG(Lib_Kernel, "(PARTIAL) signum = {}, handler = {}", signum, fmt::ptr(handler));
+    return nullptr;
+}
+
+s32 PS4_SYSV_ABI posix_sysctl(const s32* name, u32 namelen, void* oldp, u64* oldlenp,
+                              const void* newp, u64 newlen) {
+    LOG_DEBUG(Lib_Kernel, "(STUBBED) namelen = {}, oldp = {}, newp = {}, newlen = {}", namelen,
+              fmt::ptr(oldp), fmt::ptr(newp), newlen);
+    if (oldlenp != nullptr) {
+        *oldlenp = 0;
+    }
+    return 0;
+}
+
+s32 PS4_SYSV_ABI posix_sigreturn(void* context) {
+    LOG_DEBUG(Lib_Kernel, "(STUBBED) context = {}", fmt::ptr(context));
+    return 0;
+}
+
+s32 PS4_SYSV_ABI elf_phdr_match_addr(void* info, void* addr) {
+    LOG_DEBUG(Lib_Kernel, "(STUBBED) info = {}, addr = {}", fmt::ptr(info), fmt::ptr(addr));
+    return 0;
+}
+
+void PS4_SYSV_ABI pthread_cxa_finalize(void* dso_handle) {
+    LOG_TRACE(Lib_Kernel, "__pthread_cxa_finalize({}) ignored", fmt::ptr(dso_handle));
+}
+
+s32 PS4_SYSV_ABI scePthreadSetcancelstate(s32 state, s32* oldstate) {
+    LOG_DEBUG(Lib_Kernel, "(STUBBED) state = {}", state);
+    if (oldstate != nullptr) {
+        *oldstate = 0;
+    }
+    return ORBIS_OK;
+}
+
 s32 PS4_SYSV_ABI exit(s32 status) {
     UNREACHABLE_MSG("Exiting with status code {}", status);
     return 0;
@@ -298,6 +359,7 @@ void RegisterProcess(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("g0VTBxfJyu0", "libkernel", 1, "libkernel", sceKernelGetCurrentCpu);
     LIB_FUNCTION("959qrazPIrg", "libkernel", 1, "libkernel", sceKernelGetProcParam);
     LIB_FUNCTION("wzvqT4UqKX8", "libkernel", 1, "libkernel", sceKernelLoadStartModule);
+    LIB_FUNCTION("QKd0qM58Qes", "libkernel", 1, "libkernel", sceKernelStopUnloadModule);
     LIB_FUNCTION("LwG8g3niqwA", "libkernel", 1, "libkernel", sceKernelDlsym);
     LIB_FUNCTION("RpQJJVKTiFM", "libkernel", 1, "libkernel", sceKernelGetModuleInfoForUnwind);
     LIB_FUNCTION("f7KBOafysXo", "libkernel", 1, "libkernel", sceKernelGetModuleInfoFromAddr);
@@ -308,6 +370,13 @@ void RegisterProcess(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("IuxnUuXk6Bg", "libkernel", 1, "libkernel", sceKernelGetModuleList);
     LIB_FUNCTION("ZzzC3ZGVAkc", "libkernel", 1, "libkernel", sceKernelGetModuleList2);
     LIB_FUNCTION("kg4x8Prhfxw", "libkernel", 1, "libkernel", posix_getuid);
+    LIB_FUNCTION("hHlZQUnlxSM", "libkernel", 1, "libkernel", posix_getrusage);
+    LIB_FUNCTION("VADc3MNQ3cM", "libkernel", 1, "libkernel", posix_signal);
+    LIB_FUNCTION("DFmMT80xcNI", "libkernel", 1, "libkernel", posix_sysctl);
+    LIB_FUNCTION("mo0bFmWppIw", "libkernel", 1, "libkernel", posix_sigreturn);
+    LIB_FUNCTION("Fjc4-n1+y2g", "libkernel", 1, "libkernel", elf_phdr_match_addr);
+    LIB_FUNCTION("kbw4UHHSYy0", "libkernel", 1, "libkernel", pthread_cxa_finalize);
+    LIB_FUNCTION("OAmWq+OHSjw", "libkernel", 1, "libkernel", scePthreadSetcancelstate);
     LIB_FUNCTION("6Z83sYWFlA8", "libkernel", 1, "libkernel", exit);
 }
 
