@@ -852,7 +852,7 @@ bool BufferCache::SynchronizeBufferFromImage(Buffer& buffer, VAddr device_addr, 
             return;
         }
         auto& tile_manager = texture_cache.GetTileManager();
-        tile_manager.TileImage(image, buffer_copies, buffer.Handle(), buf_offset, copy_size);
+        tile_manager.TileImage(image, buffer_copies, buffer, buf_offset, copy_size);
         synchronized = true;
     });
 

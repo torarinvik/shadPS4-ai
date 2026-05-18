@@ -108,11 +108,32 @@ static void TraceSignalFault(int sig, void* raw_context, void* fault_address) {
     if (!TraceSignalFaults()) {
         return;
     }
+    auto* code_address = Common::GetRip(raw_context);
+    const auto instruction = DisassembleInstruction(code_address);
+#ifdef ARCH_X86_64
+    const auto& state = reinterpret_cast<ucontext_t*>(raw_context)->uc_mcontext->__ss;
+    char buffer[768];
+    const auto len = std::snprintf(
+        buffer, sizeof(buffer),
+        "TRACE_SIGNAL_FAULT sig=%d rip=%p fault=%p is_write=%d inst=\"%s\" "
+        "rax=%#llx rbx=%#llx rcx=%#llx rdx=%#llx rsi=%#llx rdi=%#llx "
+        "r13=%#llx r14=%#llx\n",
+        sig, code_address, fault_address, Common::IsWriteError(raw_context) ? 1 : 0,
+        instruction.c_str(), static_cast<unsigned long long>(state.__rax),
+        static_cast<unsigned long long>(state.__rbx),
+        static_cast<unsigned long long>(state.__rcx),
+        static_cast<unsigned long long>(state.__rdx),
+        static_cast<unsigned long long>(state.__rsi),
+        static_cast<unsigned long long>(state.__rdi),
+        static_cast<unsigned long long>(state.__r13),
+        static_cast<unsigned long long>(state.__r14));
+#else
     char buffer[256];
     const auto len = std::snprintf(
         buffer, sizeof(buffer),
-        "TRACE_SIGNAL_FAULT sig=%d rip=%p fault=%p is_write=%d\n", sig,
-        Common::GetRip(raw_context), fault_address, Common::IsWriteError(raw_context) ? 1 : 0);
+        "TRACE_SIGNAL_FAULT sig=%d rip=%p fault=%p is_write=%d inst=\"%s\"\n", sig, code_address,
+        fault_address, Common::IsWriteError(raw_context) ? 1 : 0, instruction.c_str());
+#endif
     if (len > 0) {
         const auto size = static_cast<size_t>(std::min(len, static_cast<int>(sizeof(buffer) - 1)));
         write(STDERR_FILENO, buffer, size);

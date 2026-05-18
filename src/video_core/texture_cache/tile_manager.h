@@ -46,7 +46,7 @@ public:
     ~TileManager();
 
     void TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
-                   vk::Buffer out_buffer, u32 out_offset, u32 copy_size);
+                   Buffer& out_buffer, u32 out_offset, u32 copy_size);
 
     Result DetileImage(vk::Buffer in_buffer, u32 in_offset, const ImageInfo& info);
 

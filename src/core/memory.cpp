@@ -21,10 +21,18 @@
 #include <limits>
 
 #if defined(__APPLE__) && defined(ARCH_X86_64)
+#include <cstring>
+#include <sys/mman.h>
 #include <sys/ucontext.h>
+#include <unistd.h>
 #endif
 
 namespace Core {
+
+#if defined(__APPLE__) && defined(ARCH_X86_64)
+static constexpr VAddr AppleGpuReservedStart = 0x1000000000ULL;
+static constexpr VAddr AppleGpuReservedEnd = 0x7000000000ULL;
+#endif
 
 static bool RelocatedAccessViolationHandler(void* context, void* fault_address) {
     return Memory::Instance()->HandleRelocatedAccessFault(context, fault_address);
@@ -47,8 +55,6 @@ static bool IsAppleFixedRelocationEnabled() {
 
 static bool IsAppleGpuReservedOverlap(VAddr virtual_addr, u64 size) {
 #if defined(__APPLE__) && defined(ARCH_X86_64)
-    static constexpr VAddr AppleGpuReservedStart = 0x1000000000ULL;
-    static constexpr VAddr AppleGpuReservedEnd = 0x7000000000ULL;
     return virtual_addr < AppleGpuReservedEnd && virtual_addr + size > AppleGpuReservedStart;
 #else
     return false;
@@ -58,8 +64,6 @@ static bool IsAppleGpuReservedOverlap(VAddr virtual_addr, u64 size) {
 static void LogInvalidFixedMapping(VAddr virtual_addr, u64 size, std::string_view kind) {
 #if defined(__APPLE__) && defined(ARCH_X86_64)
     if (IsAppleGpuReservedOverlap(virtual_addr, size)) {
-        static constexpr VAddr AppleGpuReservedStart = 0x1000000000ULL;
-        static constexpr VAddr AppleGpuReservedEnd = 0x7000000000ULL;
         LOG_ERROR(Kernel_Vmm,
                   "Unable to map {} {:#x} bytes at address {:#x}: range overlaps the macOS "
                   "x86_64-on-Apple-Silicon GPU-reserved address hole {:#x}-{:#x}",
@@ -678,7 +682,26 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
             if (IsAppleGpuReservedOverlap(virtual_addr, size) && IsAppleFixedRelocationEnabled()) {
                 alignment = alignment > 0 ? alignment : 16_KB;
                 const auto requested_addr = virtual_addr;
-                virtual_addr = SearchFree(DEFAULT_MAPPING_BASE, size, alignment);
+                VAddr mirrored_addr = -1;
+#if defined(__APPLE__) && defined(ARCH_X86_64)
+                if (requested_addr >= AppleGpuReservedStart) {
+                    mirrored_addr =
+                        DEFAULT_MAPPING_BASE + (requested_addr - AppleGpuReservedStart);
+                    mirrored_addr = Common::AlignUp(mirrored_addr, alignment);
+                    if (!IsValidMapping(mirrored_addr, size)) {
+                        mirrored_addr = -1;
+                    } else {
+                        const auto mirror_vma = FindVMA(mirrored_addr);
+                        if (mirror_vma == vma_map.end() || !mirror_vma->second.IsFree() ||
+                            !mirror_vma->second.Contains(mirrored_addr, size)) {
+                            mirrored_addr = -1;
+                        }
+                    }
+                }
+#endif
+                virtual_addr = mirrored_addr != -1 ? mirrored_addr
+                                                   : SearchFree(DEFAULT_MAPPING_BASE, size,
+                                                                alignment);
                 if (virtual_addr == -1) {
                     return ORBIS_KERNEL_ERROR_ENOMEM;
                 }
@@ -1700,7 +1723,8 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
         return address;
     };
 
-    const auto patch_register = [&](ZydisRegister reg, const ZydisDecodedOperand& operand) -> bool {
+    const auto patch_register_direct = [&](ZydisRegister reg,
+                                           const ZydisDecodedOperand& operand) -> bool {
         auto [name, slot] = register_slot(reg);
         if (slot == nullptr) {
             return false;
@@ -1723,6 +1747,72 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
         return true;
     };
 
+    const auto patch_register_delta = [&](ZydisRegister reg,
+                                          const ZydisDecodedOperand& operand) -> bool {
+        auto [name, slot] = register_slot(reg);
+        if (slot == nullptr) {
+            return false;
+        }
+        const auto old_value = *slot;
+        const auto relocation_delta = translated_fault_addr - fault_addr;
+        u64 register_delta = relocation_delta;
+        if (reg == operand.mem.index && operand.mem.scale > 1) {
+            if (relocation_delta % operand.mem.scale != 0) {
+                return false;
+            }
+            register_delta = relocation_delta / operand.mem.scale;
+        }
+        const auto new_value = old_value + register_delta;
+        if (new_value == old_value) {
+            return false;
+        }
+        *slot = new_value;
+        const auto patched_address = calc_address(operand);
+        if (patched_address != translated_fault_addr) {
+            *slot = old_value;
+            return false;
+        }
+        LOG_TRACE(Kernel_Vmm,
+                  "Adjusted {} by relocation delta {:#x}: {:#x} -> {:#x} for fault at {:#x} -> "
+                  "{:#x}",
+                  name, register_delta, old_value, new_value, fault_addr, translated_fault_addr);
+        return true;
+    };
+
+    const auto patch_absolute_displacement = [&](const ZydisDecodedOperand& operand) -> bool {
+        if (operand.mem.base != ZYDIS_REGISTER_NONE || operand.mem.index != ZYDIS_REGISTER_NONE ||
+            operand.mem.disp.size != 64 || operand.mem.disp.offset == 0) {
+            return false;
+        }
+
+        auto* instruction_bytes = reinterpret_cast<u8*>(state.__rip);
+        const auto displacement_offset = operand.mem.disp.offset / 8;
+        const auto displacement_size = operand.mem.disp.size / 8;
+        if (displacement_offset + displacement_size > instruction.length) {
+            return false;
+        }
+
+        const auto page_size = static_cast<u64>(sysconf(_SC_PAGESIZE));
+        const auto page_start = Common::AlignDown(state.__rip, page_size);
+        const auto page_end = Common::AlignUp(state.__rip + instruction.length, page_size);
+        const auto protect_size = page_end - page_start;
+        if (mprotect(reinterpret_cast<void*>(page_start), protect_size,
+                     PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+            return false;
+        }
+
+        std::memcpy(instruction_bytes + displacement_offset, &translated_fault_addr,
+                    sizeof(translated_fault_addr));
+        __builtin___clear_cache(reinterpret_cast<char*>(page_start),
+                                reinterpret_cast<char*>(page_start + protect_size));
+        mprotect(reinterpret_cast<void*>(page_start), protect_size, PROT_READ | PROT_EXEC);
+
+        LOG_TRACE(Kernel_Vmm,
+                  "Patched absolute relocated guest pointer in instruction {:#x}: {:#x} -> {:#x}",
+                  state.__rip, fault_addr, translated_fault_addr);
+        return true;
+    };
+
     for (u8 i = 0; i < instruction.operand_count; i++) {
         const auto& operand = operands[i];
         if (operand.type != ZYDIS_OPERAND_TYPE_MEMORY || calc_address(operand) != fault_addr) {
@@ -1730,11 +1820,23 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
         }
         if (operand.mem.base != ZYDIS_REGISTER_NONE &&
             operand.mem.base != ZYDIS_REGISTER_RIP &&
-            patch_register(operand.mem.base, operand)) {
+            patch_register_direct(operand.mem.base, operand)) {
             return true;
         }
         if (operand.mem.index != ZYDIS_REGISTER_NONE &&
-            patch_register(operand.mem.index, operand)) {
+            patch_register_direct(operand.mem.index, operand)) {
+            return true;
+        }
+        if (operand.mem.base != ZYDIS_REGISTER_NONE &&
+            operand.mem.base != ZYDIS_REGISTER_RIP &&
+            patch_register_delta(operand.mem.base, operand)) {
+            return true;
+        }
+        if (operand.mem.index != ZYDIS_REGISTER_NONE &&
+            patch_register_delta(operand.mem.index, operand)) {
+            return true;
+        }
+        if (patch_absolute_displacement(operand)) {
             return true;
         }
     }

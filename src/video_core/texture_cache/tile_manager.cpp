@@ -275,13 +275,23 @@ TileManager::Result TileManager::DetileImage(vk::Buffer in_buffer, u32 in_offset
 }
 
 void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
-                            vk::Buffer out_buffer, u32 out_offset, u32 copy_size) {
+                            Buffer& out_buffer, u32 out_offset, u32 copy_size) {
     const auto& info = in_image.info;
     if (!info.props.is_tiled) {
         for (auto& copy : buffer_copies) {
             copy.bufferOffset += out_offset;
         }
-        in_image.Download(buffer_copies, out_buffer, out_offset, copy_size);
+        in_image.Download(buffer_copies, out_buffer.Handle(), out_offset, copy_size);
+        if (auto barrier =
+                out_buffer.GetBarrier(vk::AccessFlagBits2::eMemoryRead |
+                                           vk::AccessFlagBits2::eMemoryWrite,
+                                       vk::PipelineStageFlagBits2::eAllCommands, out_offset)) {
+            scheduler.CommandBuffer().pipelineBarrier2(vk::DependencyInfo{
+                .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+                .bufferMemoryBarrierCount = 1,
+                .pBufferMemoryBarriers = &*barrier,
+            });
+        }
         return;
     }
 
@@ -314,10 +324,20 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     const auto cmdbuf = scheduler.CommandBuffer();
     in_image.Download(buffer_copies, temp_buffer, 0, valid_size);
 
+    if (auto barrier = out_buffer.GetBarrier(vk::AccessFlagBits2::eShaderWrite,
+                                             vk::PipelineStageFlagBits2::eComputeShader,
+                                             out_offset)) {
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers = &*barrier,
+        });
+    }
+
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, GetTilingPipeline(info, true));
 
     const vk::DescriptorBufferInfo tiled_buffer_info{
-        .buffer = out_buffer,
+        .buffer = out_buffer.Handle(),
         .offset = out_offset,
         .range = valid_size,
     };
@@ -361,6 +381,17 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
         return;
     }
     cmdbuf.dispatch(dim_x, 1, 1);
+
+    if (auto barrier =
+            out_buffer.GetBarrier(vk::AccessFlagBits2::eMemoryRead |
+                                      vk::AccessFlagBits2::eMemoryWrite,
+                                  vk::PipelineStageFlagBits2::eAllCommands, out_offset)) {
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers = &*barrier,
+        });
+    }
 }
 
 } // namespace VideoCore
