@@ -599,6 +599,47 @@ s64 PS4_SYSV_ABI posix_read(s32 fd, void* buf, u64 nbytes) {
     return read(fd, buf, nbytes);
 }
 
+s64 ReadHostBuffer(s32 fd, void* buf, u64 nbytes) {
+    auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
+    auto* file = h->GetFile(fd);
+    if (file == nullptr) {
+        *__Error() = POSIX_EBADF;
+        return -1;
+    }
+
+    std::scoped_lock lk{file->m_mutex};
+    if (file->type == Core::FileSys::FileType::Device) {
+        s64 result = file->device->read(buf, nbytes);
+        if (result < 0) {
+            ErrSceToPosix(result);
+            return -1;
+        }
+        return result;
+    } else if (file->type == Core::FileSys::FileType::Directory) {
+        s64 result = file->directory->read(buf, nbytes);
+        if (result < 0) {
+            ErrSceToPosix(result);
+            return -1;
+        }
+        return result;
+    } else if (file->type == Core::FileSys::FileType::Socket) {
+        return file->socket->ReceivePacket(buf, nbytes, 0, nullptr, 0);
+    }
+
+    if (file->f.IsWriteOnly()) {
+        *__Error() = POSIX_EBADF;
+        return -1;
+    }
+
+    const s64 start_pos = ShouldTracePakIo(file) ? file->f.Tell() : 0;
+    const s64 result = file->f.ReadRaw<u8>(static_cast<u8*>(buf), nbytes);
+    if (ShouldTracePakIo(file)) {
+        LOG_INFO(Kernel_Fs, "pak host read: fd={} path={} pos={} requested={} bytes={}", fd,
+                 file->m_guest_name, start_pos, nbytes, result);
+    }
+    return result;
+}
+
 s64 PS4_SYSV_ABI sceKernelRead(s32 fd, void* buf, u64 nbytes) {
     s64 result = read(fd, buf, nbytes);
     if (result < 0) {

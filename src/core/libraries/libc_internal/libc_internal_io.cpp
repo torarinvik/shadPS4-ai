@@ -16,9 +16,22 @@
 #include "core/libraries/libc_internal/libc_internal_io.h"
 #include "core/libraries/libc_internal/libc_internal_threads.h"
 #include "core/libraries/libs.h"
+#include "core/memory.h"
 #include "printf.h"
 
 namespace Libraries::LibcInternal {
+
+static bool WriteGuestFileBuffer(char*& dst, const void* src, u64 size) {
+    if (size == 0) {
+        return true;
+    }
+    if (!Core::Memory::Instance()->TryWriteGuestMemory(dst, src, size)) {
+        *Kernel::__Error() = POSIX_EFAULT;
+        return false;
+    }
+    dst += size;
+    return true;
+}
 
 s32 PS4_SYSV_ABI internal_snprintf(char* s, u64 n, VA_ARGS) {
     VA_CTX(ctx);
@@ -379,8 +392,8 @@ s32 PS4_SYSV_ABI internal__Frprep(OrbisFILE* file) {
     file->_Rend = file_buf;
     file->_Wend = file_buf;
     // Intentional shrinking here, library treats value as 32-bit.
-    s32 read_result =
-        Libraries::Kernel::sceKernelRead(file->_Handle, file_buf, file->_Bend - file_buf);
+    s64 read_result =
+        Libraries::Kernel::ReadHostBuffer(file->_Handle, file_buf, file->_Bend - file_buf);
     if (read_result < 0) {
         u8* off_mode = reinterpret_cast<u8*>(&file->_Mode) + 1;
         *off_mode = *off_mode | 0x42;
@@ -410,8 +423,10 @@ u64 PS4_SYSV_ABI internal_fread(char* ptr, u64 size, u64 nmemb, OrbisFILE* file)
                 break;
             }
             file->_Rback = rback_ptr + 1;
-            *ptr = *rback_ptr;
-            ptr++;
+            if (!WriteGuestFileBuffer(ptr, rback_ptr, 1)) {
+                internal__Unlockfilelock(file);
+                return (total_size - remaining_size) / size;
+            }
             remaining_size--;
         }
     }
@@ -435,9 +450,11 @@ u64 PS4_SYSV_ABI internal_fread(char* ptr, u64 size, u64 nmemb, OrbisFILE* file)
             file_ptr = file->_Rend;
         }
         u64 copy_bytes = std::min<u64>(file_ptr - src, remaining_size);
-        std::memcpy(ptr, src, copy_bytes);
+        if (!WriteGuestFileBuffer(ptr, src, copy_bytes)) {
+            internal__Unlockfilelock(file);
+            return (total_size - remaining_size) / size;
+        }
         file->_Next += copy_bytes;
-        ptr += copy_bytes;
         remaining_size -= copy_bytes;
     }
     internal__Unlockfilelock(file);
