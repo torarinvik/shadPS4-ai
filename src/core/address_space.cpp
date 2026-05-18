@@ -241,19 +241,28 @@ struct AddressSpace::Impl {
         if (phys_addr != -1) {
             HANDLE backing = fd != -1 ? reinterpret_cast<HANDLE>(fd) : backing_handle;
             if (fd != -1 && prot == PAGE_READONLY) {
+                // Allocate the memory for the mapping.
                 DWORD resultvar;
                 ptr = VirtualAlloc2(process, reinterpret_cast<PVOID>(virtual_addr), size,
                                     MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER,
                                     PAGE_READWRITE, nullptr, 0);
 
-                // phys_addr serves as an offset for file mmaps.
-                // Create an OVERLAPPED with the offset, then supply that to ReadFile
+                // Use ReadFile to read file contents into the memory area.
+                // Create an OVERLAPPED with the file offset, then supply that to ReadFile.
                 OVERLAPPED param{};
                 // Offset is the least-significant 32 bits, OffsetHigh is the most-significant.
                 param.Offset = phys_addr & 0xffffffffull;
                 param.OffsetHigh = (phys_addr & 0xffffffff00000000ull) >> 32;
                 bool ret = ReadFile(backing, ptr, size, &resultvar, &param);
                 ASSERT_MSG(ret, "ReadFile failed. {}", Common::GetLastErrorMsg());
+
+                // ReadFile moves the file pointer, restore it so mmap-style reads are non-invasive.
+                LARGE_INTEGER move_distance{};
+                move_distance.QuadPart = -static_cast<LONGLONG>(size);
+                ret = SetFilePointerEx(backing, move_distance, nullptr, FILE_CURRENT);
+                ASSERT_MSG(ret, "SetFilePointerEx failed. {}", Common::GetLastErrorMsg());
+
+                // Protect the memory area appropriately.
                 ret = VirtualProtect(ptr, size, prot, &resultvar);
                 ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
             } else {
