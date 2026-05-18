@@ -69,9 +69,12 @@ std::unordered_map<vk::Format, vk::FormatProperties3> GetFormatProperties(
     // Other miscellaneous formats, e.g. for color buffers, swizzles, or compatibility
     static constexpr std::array misc_formats = {
         vk::Format::eA2R10G10B10UnormPack32,
+        vk::Format::eA4B4G4R4UnormPack16,
+        vk::Format::eA4R4G4B4UnormPack16,
         vk::Format::eB8G8R8A8Unorm,
         vk::Format::eB8G8R8A8Srgb,
         vk::Format::eD24UnormS8Uint,
+        vk::Format::eR4G4B4A4UnormPack16,
     };
     for (const auto& format : misc_formats) {
         if (!format_properties.contains(format)) {
@@ -921,6 +924,17 @@ vk::Format Instance::GetSupportedFormat(const vk::Format format,
         case vk::Format::eR8Srgb:
             if (IsFormatSupported(vk::Format::eR8Unorm, flags)) {
                 return vk::Format::eR8Unorm;
+            }
+            break;
+        case vk::Format::eB4G4R4A4UnormPack16:
+            if (IsFormatSupported(vk::Format::eR4G4B4A4UnormPack16, flags)) {
+                return vk::Format::eR4G4B4A4UnormPack16;
+            }
+            if (IsFormatSupported(vk::Format::eA4B4G4R4UnormPack16, flags)) {
+                return vk::Format::eA4B4G4R4UnormPack16;
+            }
+            if (IsFormatSupported(vk::Format::eA4R4G4B4UnormPack16, flags)) {
+                return vk::Format::eA4R4G4B4UnormPack16;
             }
             break;
         default:

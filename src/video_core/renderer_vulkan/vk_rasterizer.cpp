@@ -106,6 +106,18 @@ static bool IsForceVideoOutSourceColorsEnabled() {
     return enabled;
 }
 
+static bool IsComputeMetaClearHleDisabled() {
+    static const bool disabled =
+        Common::Trace::EnvEnabled("SHADPS4_DISABLE_COMPUTE_META_CLEAR_HLE");
+    return disabled;
+}
+
+static bool IsComputeImageClearHleDisabled() {
+    static const bool disabled =
+        Common::Trace::EnvEnabled("SHADPS4_DISABLE_COMPUTE_IMAGE_CLEAR_HLE");
+    return disabled;
+}
+
 static const char* MetaTypeName(VideoCore::TextureCache::MetaDataInfo::Type type) {
     switch (type) {
     case VideoCore::TextureCache::MetaDataInfo::Type::CMask:
@@ -637,6 +649,9 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
 }
 
 bool Rasterizer::IsComputeMetaClear(const Pipeline* pipeline) {
+    if (IsComputeMetaClearHleDisabled()) {
+        return false;
+    }
     if (!pipeline->IsCompute()) {
         return false;
     }
@@ -747,6 +762,9 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
 }
 
 bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
+    if (IsComputeImageClearHleDisabled()) {
+        return false;
+    }
     if (!pipeline->IsCompute()) {
         return false;
     }
@@ -1959,6 +1977,14 @@ void Rasterizer::UpdateViewportScissorState() const {
     }
 
     if (viewports.empty()) {
+        static std::atomic_uint dummy_viewport_warn_count{0};
+        const u32 warn_count = dummy_viewport_warn_count.fetch_add(1, std::memory_order_relaxed);
+        if (warn_count < 16 || IsStrictRenderValidationEnabled()) {
+            LOG_WARNING(Render_Vulkan,
+                        "No valid guest viewport; using dummy 1x1 viewport. Draw output will "
+                        "likely be invisible. count={}",
+                        warn_count + 1);
+        }
         // Vulkan requires providing at least one viewport.
         constexpr vk::Viewport empty_viewport = {
             .x = -1.0f,

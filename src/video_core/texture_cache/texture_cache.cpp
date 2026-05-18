@@ -108,6 +108,83 @@ static bool IsBlockFormat(vk::Format format) {
     }
 }
 
+static u32 NullImageBitsPerBlock(vk::Format format) {
+    switch (format) {
+    case vk::Format::eR8Unorm:
+    case vk::Format::eR8Snorm:
+    case vk::Format::eR8Uint:
+    case vk::Format::eR8Sint:
+    case vk::Format::eS8Uint:
+        return 8;
+    case vk::Format::eR4G4B4A4UnormPack16:
+    case vk::Format::eB4G4R4A4UnormPack16:
+    case vk::Format::eR5G6B5UnormPack16:
+    case vk::Format::eB5G6R5UnormPack16:
+    case vk::Format::eA1R5G5B5UnormPack16:
+    case vk::Format::eR8G8Unorm:
+    case vk::Format::eR8G8Snorm:
+    case vk::Format::eR8G8Uint:
+    case vk::Format::eR8G8Sint:
+    case vk::Format::eR16Unorm:
+    case vk::Format::eR16Snorm:
+    case vk::Format::eR16Uint:
+    case vk::Format::eR16Sint:
+    case vk::Format::eR16Sfloat:
+    case vk::Format::eD16Unorm:
+        return 16;
+    case vk::Format::eR8G8B8A8Unorm:
+    case vk::Format::eR8G8B8A8Srgb:
+    case vk::Format::eB8G8R8A8Unorm:
+    case vk::Format::eB8G8R8A8Srgb:
+    case vk::Format::eA2B10G10R10UnormPack32:
+    case vk::Format::eA2R10G10B10UnormPack32:
+    case vk::Format::eR16G16Unorm:
+    case vk::Format::eR16G16Snorm:
+    case vk::Format::eR16G16Uint:
+    case vk::Format::eR16G16Sint:
+    case vk::Format::eR16G16Sfloat:
+    case vk::Format::eR32Uint:
+    case vk::Format::eR32Sint:
+    case vk::Format::eR32Sfloat:
+    case vk::Format::eD32Sfloat:
+    case vk::Format::eD24UnormS8Uint:
+    case vk::Format::eX8D24UnormPack32:
+        return 32;
+    case vk::Format::eR16G16B16A16Unorm:
+    case vk::Format::eR16G16B16A16Snorm:
+    case vk::Format::eR16G16B16A16Uint:
+    case vk::Format::eR16G16B16A16Sint:
+    case vk::Format::eR16G16B16A16Sfloat:
+    case vk::Format::eR32G32Uint:
+    case vk::Format::eR32G32Sint:
+    case vk::Format::eR32G32Sfloat:
+    case vk::Format::eBc1RgbUnormBlock:
+    case vk::Format::eBc1RgbSrgbBlock:
+    case vk::Format::eBc1RgbaUnormBlock:
+    case vk::Format::eBc1RgbaSrgbBlock:
+    case vk::Format::eBc4UnormBlock:
+    case vk::Format::eBc4SnormBlock:
+    case vk::Format::eD32SfloatS8Uint:
+        return 64;
+    case vk::Format::eR32G32B32A32Uint:
+    case vk::Format::eR32G32B32A32Sint:
+    case vk::Format::eR32G32B32A32Sfloat:
+    case vk::Format::eBc2UnormBlock:
+    case vk::Format::eBc2SrgbBlock:
+    case vk::Format::eBc3UnormBlock:
+    case vk::Format::eBc3SrgbBlock:
+    case vk::Format::eBc5UnormBlock:
+    case vk::Format::eBc5SnormBlock:
+    case vk::Format::eBc6HUfloatBlock:
+    case vk::Format::eBc6HSfloatBlock:
+    case vk::Format::eBc7UnormBlock:
+    case vk::Format::eBc7SrgbBlock:
+        return 128;
+    default:
+        return 32;
+    }
+}
+
 static bool IsTraceMetaDataRegisterEnabled() {
     static const bool enabled = [] {
         const char* value = std::getenv("SHADPS4_TRACE_METADATA_REGISTER");
@@ -248,7 +325,7 @@ ImageId TextureCache::GetNullImage(const vk::Format format) {
     info.props.is_depth = IsDepthFormat(format);
     info.props.has_stencil = HasStencil(format);
     info.props.is_block = IsBlockFormat(format);
-    info.num_bits = 32;
+    info.num_bits = NullImageBitsPerBlock(format);
     info.UpdateSize();
 
     const ImageId null_id =

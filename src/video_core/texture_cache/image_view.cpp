@@ -124,11 +124,14 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
         aspect = vk::ImageAspectFlagBits::eStencil;
     }
 
+    const vk::Format actual_format = instance.GetSupportedFormat(format, image.format_features);
+    const bool format_substituted = actual_format != format;
+
     const vk::ImageViewCreateInfo image_view_ci = {
         .pNext = &usage_ci,
         .image = image.GetImage(),
         .viewType = ConvertImageViewType(info.type),
-        .format = instance.GetSupportedFormat(format, image.format_features),
+        .format = actual_format,
         .components = info.mapping,
         .subresourceRange{
             .aspectMask = aspect,
@@ -143,6 +146,16 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     const bool empty_range = info.range.extent.levels == 0 || info.range.extent.layers == 0;
     const bool oob_range =
         end_level > image.info.resources.levels || end_layer > image.info.resources.layers;
+    if (format_substituted) {
+        LOG_INFO(Render_Vulkan,
+                 "TRACE_IMAGE_VIEW format_substitution guest_addr={:#x} guest_size={} "
+                 "image_format={} requested_view_format={} actual_view_format={} "
+                 "usage_storage={} image_features={}",
+                 image.info.guest_address, image.info.guest_size,
+                 vk::to_string(image.info.pixel_format), vk::to_string(format),
+                 vk::to_string(actual_format), info.is_storage,
+                 vk::to_string(image.format_features));
+    }
     if (IsImageViewInvariantTraceEnabled() || empty_range || oob_range) {
         LOG_INFO(Render_Vulkan,
                  "TRACE_IMAGE_VIEW invariant guest_addr={:#x} guest_size={} image_type={} "
