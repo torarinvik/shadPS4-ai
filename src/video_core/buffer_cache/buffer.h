@@ -7,6 +7,7 @@
 #include <optional>
 #include <utility>
 #include <vector>
+#include "common/logging/log.h"
 #include "common/types.h"
 #include "video_core/amdgpu/resource.h"
 #include "video_core/renderer_vulkan/vk_common.h"
@@ -137,11 +138,23 @@ public:
     std::optional<vk::BufferMemoryBarrier2> GetBarrier(vk::AccessFlags2 dst_acess_mask,
                                                        vk::PipelineStageFlagBits2 dst_stage,
                                                        u32 offset = 0) {
+        if (!buffer.buffer) {
+            LOG_WARNING(Render_Vulkan,
+                        "Skipping buffer barrier for null buffer cpu_addr={:#x} size={:#x} "
+                        "offset={:#x}",
+                        cpu_addr, size_bytes, offset);
+            return {};
+        }
+        if (offset >= size_bytes) {
+            LOG_WARNING(Render_Vulkan,
+                        "Skipping buffer barrier with out-of-bounds offset cpu_addr={:#x} "
+                        "size={:#x} offset={:#x}",
+                        cpu_addr, size_bytes, offset);
+            return {};
+        }
         if (dst_acess_mask == access_mask && stage == dst_stage) {
             return {};
         }
-
-        DEBUG_ASSERT(offset < size_bytes);
 
         const auto barrier = vk::BufferMemoryBarrier2{
             .srcStageMask = stage,

@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <magic_enum/magic_enum.hpp>
+
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/div_ceil.h"
@@ -55,6 +57,24 @@ static bool IsDepthFormat(vk::Format format) {
         return true;
     default:
         return false;
+    }
+}
+
+static bool AreImageTypesViewCompatible(AmdGpu::ImageType requested_type,
+                                        AmdGpu::ImageType cached_type) {
+    switch (requested_type) {
+    case AmdGpu::ImageType::Color1D:
+    case AmdGpu::ImageType::Color1DArray:
+        return cached_type == AmdGpu::ImageType::Color1D;
+    case AmdGpu::ImageType::Color2D:
+    case AmdGpu::ImageType::Color2DArray:
+    case AmdGpu::ImageType::Color2DMsaa:
+    case AmdGpu::ImageType::Color2DMsaaArray:
+        return cached_type == AmdGpu::ImageType::Color2D || cached_type == AmdGpu::ImageType::Color3D;
+    case AmdGpu::ImageType::Color3D:
+        return cached_type == AmdGpu::ImageType::Color3D;
+    default:
+        return requested_type == cached_type;
     }
 }
 
@@ -597,6 +617,18 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
             (image_info.type == AmdGpu::ImageType::Color3D ||
              cache_image.info.type == AmdGpu::ImageType::Color3D)) {
             return {ExpandImage(image_info, cache_image_id), -1, -1};
+        }
+
+        if (!AreImageTypesViewCompatible(image_info.type, cache_image.info.type)) {
+            LOG_WARNING(Render_Vulkan,
+                        "Avoiding incompatible image type reuse requested_addr={:#x} "
+                        "requested_size={} requested_type={} cached_id={} cached_addr={:#x} "
+                        "cached_size={} cached_type={} binding={}",
+                        image_info.guest_address, image_info.guest_size,
+                        magic_enum::enum_name(image_info.type), cache_image_id.index,
+                        cache_image.info.guest_address, cache_image.info.guest_size,
+                        magic_enum::enum_name(cache_image.info.type), BindingTypeName(binding));
+            return {merged_image_id, -1, -1};
         }
 
         // Same base address, but the later descriptor exposes more mip/layer resources than the

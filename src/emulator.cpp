@@ -549,8 +549,22 @@ void Emulator::Restart(std::filesystem::path eboot_path,
         args.push_back(MemoryPatcher::patch_file);
     }
 
-    args.push_back("--wait-for-pid");
-    args.push_back(std::to_string(CurrentPidForRestart()));
+    auto& ipc = IPC::Instance();
+
+    // POSIX can replace the current process in-place. That avoids the fragile
+    // fork-child / wait-for-parent handoff and releases the old renderer state
+    // before the restarted game begins initialization.
+    const bool restart_in_place =
+#if defined(__APPLE__) || defined(__linux__) || defined(__FreeBSD__)
+        !ipc.IsEnabled();
+#else
+        false;
+#endif
+
+    if (!restart_in_place) {
+        args.push_back("--wait-for-pid");
+        args.push_back(std::to_string(CurrentPidForRestart()));
+    }
 
     if (waitForDebuggerBeforeRun) {
         args.push_back("--wait-for-debugger");
@@ -566,8 +580,6 @@ void Emulator::Restart(std::filesystem::path eboot_path,
     LOG_INFO(Common, "Restarting the emulator with args: {}", fmt::join(args, " "));
     Libraries::SaveData::Backup::StopThread();
     Common::Log::Shutdown();
-
-    auto& ipc = IPC::Instance();
 
     if (ipc.IsEnabled()) {
         ipc.SendRestart(args);
@@ -612,16 +624,9 @@ void Emulator::Restart(std::filesystem::path eboot_path,
     }
     argv.push_back(nullptr);
 
-    pid_t pid = fork();
-    if (pid == 0) {
-        // Child process - execute the new instance
-        execvp(executableName, argv.data());
-        std::cerr << "Failed to restart game: execvp failed" << std::endl;
-        std::quick_exit(1);
-    } else if (pid < 0) {
-        std::cerr << "Failed to restart game: fork failed" << std::endl;
-        std::quick_exit(1);
-    }
+    execvp(executableName, argv.data());
+    std::cerr << "Failed to restart game: execvp failed" << std::endl;
+    std::quick_exit(1);
 #else
 #error "Unsupported platform"
 #endif

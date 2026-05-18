@@ -17,6 +17,18 @@
 
 namespace Libraries::UserService {
 
+static User* ResolveUserOrDefault(const int user_id) {
+    if (user_id == ORBIS_USER_SERVICE_USER_ID_INVALID) {
+        return nullptr;
+    }
+
+    if (user_id == ORBIS_USER_SERVICE_USER_ID_SYSTEM) {
+        return UserManagement.GetUserByPlayerIndex(1);
+    }
+
+    return UserManagement.GetUserByID(user_id);
+}
+
 int PS4_SYSV_ABI sceUserServiceInitializeForShellCore() {
     LOG_ERROR(Lib_UserService, "(STUBBED) called");
     return ORBIS_OK;
@@ -1065,13 +1077,19 @@ int PS4_SYSV_ABI sceUserServiceGetTraditionalChineseInputType() {
 }
 
 s32 PS4_SYSV_ABI sceUserServiceGetUserColor(int user_id, OrbisUserServiceUserColor* color) {
-    // TODO fix me better
     LOG_DEBUG(Lib_UserService, "called user_id = {}", user_id);
     if (color == nullptr) {
         LOG_ERROR(Lib_UserService, "color is null");
         return ORBIS_USER_SERVICE_ERROR_INVALID_ARGUMENT;
     }
-    *color = (OrbisUserServiceUserColor)UserManagement.GetUserByID(user_id)->user_color;
+
+    const auto* user = ResolveUserOrDefault(user_id);
+    if (user == nullptr) {
+        LOG_ERROR(Lib_UserService, "invalid or unknown user_id = {}", user_id);
+        return ORBIS_USER_SERVICE_ERROR_INVALID_ARGUMENT;
+    }
+
+    *color = static_cast<OrbisUserServiceUserColor>(user->user_color);
     return ORBIS_OK;
 }
 
@@ -1092,22 +1110,19 @@ int PS4_SYSV_ABI sceUserServiceGetUserGroupNum() {
 
 s32 PS4_SYSV_ABI sceUserServiceGetUserName(int user_id, char* user_name, std::size_t size) {
     LOG_DEBUG(Lib_UserService, "called user_id = {}, size = {} ", user_id, size);
-    if (user_id == ORBIS_USER_SERVICE_USER_ID_INVALID) {
-        LOG_ERROR(Lib_UserService, "invalid user_id");
-        return ORBIS_USER_SERVICE_ERROR_INVALID_ARGUMENT;
-    }
     if (user_name == nullptr) {
         LOG_ERROR(Lib_UserService, "user_name is null");
         return ORBIS_USER_SERVICE_ERROR_INVALID_ARGUMENT;
     }
-    std::string name = "shadPS4";
-    auto const* u = UserManagement.GetUserByID(user_id);
-    if (u != nullptr) {
-        name = u->user_name;
-    } else {
-        LOG_ERROR(Lib_UserService, "No user found");
+
+    const auto* user = ResolveUserOrDefault(user_id);
+    if (user == nullptr) {
+        LOG_ERROR(Lib_UserService, "invalid or unknown user_id = {}", user_id);
+        return ORBIS_USER_SERVICE_ERROR_INVALID_ARGUMENT;
     }
-    if (size < name.length()) {
+
+    const std::string& name = user->user_name;
+    if (size <= name.length()) {
         LOG_ERROR(Lib_UserService, "buffer is too short");
         return ORBIS_USER_SERVICE_ERROR_BUFFER_TOO_SHORT;
     }
