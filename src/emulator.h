@@ -4,8 +4,10 @@
 #pragma once
 
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <thread>
+#include <vector>
 
 #include "common/singleton.h"
 #include "core/linker.h"
@@ -41,6 +43,8 @@ public:
 
 private:
     void LoadSystemModules(const std::string& game_serial);
+    void ExecuteRestartArgs(const std::vector<std::string>& args);
+    std::optional<std::vector<std::string>> TakePendingRestartArgs();
 
     Core::MemoryManager* memory;
     Input::GameControllers* controllers;
@@ -48,6 +52,8 @@ private:
     std::unique_ptr<Frontend::WindowSDL> window;
     std::chrono::steady_clock::time_point start_time;
     std::jthread play_time_thread;
+    std::mutex restart_mutex;
+    std::optional<std::vector<std::string>> pending_restart_args;
 };
 
 } // namespace Core

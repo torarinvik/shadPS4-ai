@@ -73,6 +73,7 @@ public:
 
     void WaitEvent();
     void InitTimers();
+    void RequestClose();
 
     void RequestKeyboard();
     void ReleaseKeyboard();

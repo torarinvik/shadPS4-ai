@@ -1085,7 +1085,7 @@ s32 PS4_SYSV_ABI sceUserServiceGetUserColor(int user_id, OrbisUserServiceUserCol
 
     const auto* user = ResolveUserOrDefault(user_id);
     if (user == nullptr) {
-        LOG_ERROR(Lib_UserService, "invalid or unknown user_id = {}", user_id);
+        LOG_DEBUG(Lib_UserService, "invalid or unknown user_id = {}", user_id);
         return ORBIS_USER_SERVICE_ERROR_INVALID_ARGUMENT;
     }
 
@@ -1117,7 +1117,7 @@ s32 PS4_SYSV_ABI sceUserServiceGetUserName(int user_id, char* user_name, std::si
 
     const auto* user = ResolveUserOrDefault(user_id);
     if (user == nullptr) {
-        LOG_ERROR(Lib_UserService, "invalid or unknown user_id = {}", user_id);
+        LOG_DEBUG(Lib_UserService, "invalid or unknown user_id = {}", user_id);
         return ORBIS_USER_SERVICE_ERROR_INVALID_ARGUMENT;
     }
 

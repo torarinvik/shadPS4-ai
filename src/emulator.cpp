@@ -522,8 +522,18 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     UpdatePlayTime(id);
     Storage::DataBase::Instance().Close();
+    if (auto restart_args = TakePendingRestartArgs()) {
+        ExecuteRestartArgs(*restart_args);
+    }
 
     std::quick_exit(0);
+}
+
+std::optional<std::vector<std::string>> Emulator::TakePendingRestartArgs() {
+    std::scoped_lock lock{restart_mutex};
+    auto args = std::move(pending_restart_args);
+    pending_restart_args.reset();
+    return args;
 }
 
 void Emulator::Restart(std::filesystem::path eboot_path,
@@ -578,8 +588,24 @@ void Emulator::Restart(std::filesystem::path eboot_path,
     }
 
     LOG_INFO(Common, "Restarting the emulator with args: {}", fmt::join(args, " "));
+
+    if (restart_in_place && window != nullptr) {
+        {
+            std::scoped_lock lock{restart_mutex};
+            pending_restart_args = args;
+        }
+        window->RequestClose();
+        return;
+    }
+
+    ExecuteRestartArgs(args);
+}
+
+void Emulator::ExecuteRestartArgs(const std::vector<std::string>& args) {
+    auto& ipc = IPC::Instance();
+
     Libraries::SaveData::Backup::StopThread();
-    Common::Log::Shutdown();
+    Common::Log::Flush();
 
     if (ipc.IsEnabled()) {
         ipc.SendRestart(args);

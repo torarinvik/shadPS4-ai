@@ -363,6 +363,12 @@ void WindowSDL::InitTimers() {
     SDL_AddTimer(33, Input::MousePolling, (void*)controllers[0]);
 }
 
+void WindowSDL::RequestClose() {
+    SDL_Event event{};
+    event.type = SDL_EVENT_QUIT;
+    SDL_PushEvent(&event);
+}
+
 void WindowSDL::RequestKeyboard() {
     if (keyboard_grab == 0) {
         SDL_RunOnMainThread(

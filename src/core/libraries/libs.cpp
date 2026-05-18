@@ -65,6 +65,7 @@
 #include "core/libraries/system/systemservice.h"
 #include "core/libraries/system/userservice.h"
 #include "core/libraries/ulobjmgr/ulobjmgr.h"
+#include "core/libraries/ult/ult.h"
 #include "core/libraries/usbd/usbd.h"
 #include "core/libraries/video_recording/video_recording.h"
 #include "core/libraries/videodec/videodec.h"
@@ -146,6 +147,7 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
     Libraries::HmdSetupDialog::RegisterLib(sym);
     Libraries::DiscMap::RegisterLib(sym);
     Libraries::Ulobjmgr::RegisterLib(sym);
+    Libraries::Ult::RegisterLib(sym);
     Libraries::SigninDialog::RegisterLib(sym);
     Libraries::Camera::RegisterLib(sym);
     Libraries::CompanionHttpd::RegisterLib(sym);
