@@ -7,6 +7,7 @@
 #include "shader_recompiler/ir/type.h"
 #include "video_core/amdgpu/resource.h"
 
+#include <algorithm>
 #include <boost/container/static_vector.hpp>
 
 namespace Shader {
@@ -115,7 +116,7 @@ struct ImageResource {
         if (tsharp.last_level < tsharp.base_level) {
             return 1;
         }
-        return tsharp.last_level - tsharp.base_level + 1;
+        return std::min<u32>(tsharp.last_level - tsharp.base_level + 1, NUM_IMAGES);
     }
 };
 using ImageResourceList = boost::container::static_vector<ImageResource, NUM_IMAGES>;

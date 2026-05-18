@@ -1,8 +1,121 @@
 include "../src/ufc_trace.elisa"
 include "../src/launch_intent.elisa"
+include "../src/videoout_validation.elisa"
 include "ufc_trace_fixture.elisa"
 
 extern shadps4_elisa_probe_value() -> i64
+
+
+@test
+def safe_range_rejects_wrapping_extent() -> void can[Abort.Panic]:
+    can Abort.Panic:
+        range: SafeRange = safe_range_make(18446744073709551610, 10)
+        if range.ok:
+            panic("expected wrapping range to be rejected")
+        if safe_range_size(range) != 0:
+            panic("expected invalid range size to be zero")
+
+
+@test
+def safe_range_accepts_zero_extent_without_overlap() -> void can[Abort.Panic]:
+    can Abort.Panic:
+        empty: SafeRange = safe_range_make(0x1000, 0)
+        neighbor: SafeRange = safe_range_make(0x1000, 4)
+        if not empty.ok:
+            panic("expected zero-size range to be valid")
+        if not safe_range_is_empty(empty):
+            panic("expected zero-size range to be empty")
+        if safe_range_overlaps(empty, neighbor):
+            panic("expected empty range not to overlap")
+
+
+@test
+def safe_range_checks_containment_and_intersection() -> void can[Abort.Panic]:
+    can Abort.Panic:
+        outer: SafeRange = safe_range_make(100, 50)
+        inner: SafeRange = safe_range_make(120, 10)
+        overlap: SafeRange = safe_range_make(140, 20)
+        intersection: SafeRange = safe_range_intersect(outer, overlap)
+        if not safe_range_contains_addr(outer, 149):
+            panic("expected outer to contain final byte")
+        if safe_range_contains_addr(outer, 150):
+            panic("expected outer end to be exclusive")
+        if not safe_range_contains_range(outer, inner):
+            panic("expected outer to contain inner")
+        if safe_range_contains_range(outer, overlap):
+            panic("expected outer not to contain overlap tail")
+        if not intersection.ok:
+            panic("expected intersection to be valid")
+        if intersection.begin != 140 or intersection.end != 150:
+            panic("expected clipped intersection")
+
+
+@test
+def safe_range_checks_exclusive_limits() -> void can[Abort.Panic]:
+    can Abort.Panic:
+        if not safe_range_fits_below(SafeRangeLimit::PS4_GPU_40_BIT_END - 16, 16, SafeRangeLimit::PS4_GPU_40_BIT_END):
+            panic("expected exact 40-bit limit fit")
+        if safe_range_fits_below(SafeRangeLimit::PS4_GPU_40_BIT_END - 15, 16, SafeRangeLimit::PS4_GPU_40_BIT_END):
+            panic("expected 40-bit limit overflow")
+        if safe_range_clamp_size_below(SafeRangeLimit::PS4_GPU_40_BIT_END - 15, 16, SafeRangeLimit::PS4_GPU_40_BIT_END) != 15:
+            panic("expected clamp to remaining bytes")
+
+
+@test
+def videoout_validation_rejects_bad_register_shapes() -> void can[Abort.Panic]:
+    can Abort.Panic:
+        if videoout_validate_register_shape(0, 2, true, true) != VideoOut::OK:
+            panic("expected valid register shape")
+        if videoout_validate_register_shape(-1, 1, true, true) != VideoOutError::INVALID_VALUE:
+            panic("expected negative start index to fail")
+        if videoout_validate_register_shape(15, 2, true, true) != VideoOutError::INVALID_VALUE:
+            panic("expected overflowing register range to fail")
+        if videoout_validate_register_shape(0, 1, false, true) != VideoOutError::INVALID_VALUE:
+            panic("expected missing attribute to fail")
+
+
+@test
+def videoout_validation_checks_attributes() -> void can[Abort.Panic]:
+    can Abort.Panic:
+        attribute: VideoOutAttributeFacts = VideoOutAttributeFacts(VideoOut::PIXEL_A8B8G8R8_SRGB, VideoOut::TILING_LINEAR, 0, 1920, 1080, 1920, 0, 0)
+        bad_pitch: VideoOutAttributeFacts = VideoOutAttributeFacts(VideoOut::PIXEL_A8B8G8R8_SRGB, VideoOut::TILING_LINEAR, 0, 1920, 1080, 1919, 0, 0)
+        bad_format: VideoOutAttributeFacts = VideoOutAttributeFacts(0, VideoOut::TILING_LINEAR, 0, 1920, 1080, 1920, 0, 0)
+        if videoout_validate_attribute(attribute) != VideoOut::OK:
+            panic("expected valid videoout attribute")
+        if videoout_validate_attribute(bad_pitch) != VideoOutError::INVALID_PITCH:
+            panic("expected pitch validation")
+        if videoout_validate_attribute(bad_format) != VideoOutError::INVALID_PIXEL_FORMAT:
+            panic("expected pixel format validation")
+
+
+@test
+def videoout_validation_computes_buffer_size_safely() -> void can[Abort.Panic]:
+    can Abort.Panic:
+        attribute: VideoOutAttributeFacts = VideoOutAttributeFacts(VideoOut::PIXEL_A16R16G16B16_FLOAT, VideoOut::TILING_LINEAR, 0, 1280, 720, 1280, 0, 0)
+        size: SafeRange = videoout_buffer_guest_size(attribute)
+        huge: VideoOutAttributeFacts = VideoOutAttributeFacts(VideoOut::PIXEL_A16R16G16B16_FLOAT, VideoOut::TILING_LINEAR, 0, 1, SafeRangeLimit::U64_MAX, SafeRangeLimit::U64_MAX, 0, 0)
+        huge_size: SafeRange = videoout_buffer_guest_size(huge)
+        if not size.ok:
+            panic("expected videoout size to be valid")
+        if safe_range_size(size) != 7372800:
+            panic("expected 64bpp 1280x720 byte size")
+        if huge_size.ok:
+            panic("expected overflowing videoout size to be invalid")
+
+
+@test
+def videoout_validation_rejects_bad_flip_and_buffer_indices() -> void can[Abort.Panic]:
+    can Abort.Panic:
+        if videoout_validate_flip_rate(0) != VideoOut::OK:
+            panic("expected flip rate zero")
+        if videoout_validate_flip_rate(-1) != VideoOutError::INVALID_VALUE:
+            panic("expected negative flip rate to fail")
+        if videoout_validate_buffer_index(15, true) != VideoOut::OK:
+            panic("expected final display buffer index")
+        if videoout_validate_buffer_index(16, true) != VideoOutError::INVALID_INDEX:
+            panic("expected out-of-range display buffer index")
+        if videoout_validate_buffer_index(0, false) != VideoOutError::INVALID_INDEX:
+            panic("expected unregistered display buffer index to fail")
 
 
 @test

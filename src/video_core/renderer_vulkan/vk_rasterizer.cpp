@@ -345,6 +345,15 @@ void Rasterizer::EliminateFastClear() {
     ScopeMarkerEnd();
 }
 
+static bool HasValidRenderAttachment(const RenderState& state) {
+    for (u32 cb = 0; cb < state.num_color_attachments; ++cb) {
+        if (state.color_attachments[cb].image_view) {
+            return true;
+        }
+    }
+    return state.depth_stencil_attachment.has_depth || state.depth_stencil_attachment.has_stencil;
+}
+
 void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     RENDERER_TRACE;
 
@@ -365,6 +374,10 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         return;
     }
     const auto state = BeginRendering(pipeline);
+    if (!HasValidRenderAttachment(state)) {
+        LOG_WARNING(Render_Vulkan, "Skipping draw with no valid render attachments");
+        return;
+    }
 
     buffer_cache.BindVertexBuffers(*pipeline);
     if (is_indexed) {
@@ -420,6 +433,10 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         return;
     }
     const auto state = BeginRendering(pipeline);
+    if (!HasValidRenderAttachment(state)) {
+        LOG_WARNING(Render_Vulkan, "Skipping indirect draw with no valid render attachments");
+        return;
+    }
 
     buffer_cache.BindVertexBuffers(*pipeline);
     if (is_indexed) {
@@ -500,6 +517,13 @@ void Rasterizer::DispatchDirect() {
     }
 
     if (!BindResources(pipeline)) {
+        return;
+    }
+
+    if (cs_program.dim_x == 0 || cs_program.dim_y == 0 || cs_program.dim_z == 0) {
+        LOG_WARNING(Render_Vulkan, "Skipping zero-sized compute dispatch x={} y={} z={}",
+                    cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
+        ResetBindings();
         return;
     }
 
@@ -689,10 +713,20 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline) {
     // Image copy must be valid
     VideoCore::Image& image0 = texture_cache.GetImage(image0_id);
     VideoCore::Image& image1 = texture_cache.GetImage(image1_id);
-    if (image0.info.guest_address != buf0.base_address || image1.info.guest_address != buf1.base_address ||
-        image0.info.guest_size != image1.info.guest_size ||
-        image0.info.pitch != image1.info.pitch || image0.info.guest_size != buf0.GetSize() ||
-        image0.info.num_bits != image1.info.num_bits) {
+    if (image0.info.guest_address != buf0.base_address ||
+        image1.info.guest_address != buf1.base_address ||
+        image0.info.guest_size != buf0.GetSize() || image1.info.guest_size != buf1.GetSize() ||
+        image0.info.guest_size != image1.info.guest_size || image0.info.pitch != image1.info.pitch ||
+        image0.info.num_bits != image1.info.num_bits ||
+        image0.info.pixel_format != image1.info.pixel_format ||
+        image0.info.num_samples != image1.info.num_samples || image0.info.type != image1.info.type ||
+        image0.info.resources.levels != image1.info.resources.levels ||
+        image0.info.resources.layers != image1.info.resources.layers ||
+        image0.info.props.is_depth != image1.info.props.is_depth ||
+        image0.aspect_mask != image1.aspect_mask) {
+        LOG_TRACE(Render_Vulkan,
+                  "Compute image-copy HLE rejected non-exact alias src_addr={:#x} dst_addr={:#x}",
+                  buf0.base_address, buf1.base_address);
         return false;
     }
 
@@ -1594,16 +1628,18 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         ASSERT(desc.view_info.range.extent.levels == 1 && !image.binding.needs_rebind);
 
         const bool has_stencil = image.info.props.has_stencil;
+        const bool depth_write = regs.depth_control.depth_enable &&
+                                 regs.depth_control.depth_write_enable &&
+                                 !regs.depth_view.z_read_only;
         // Stencil writes can be enabled while depth writes are off.
         const bool stencil_write =
-            has_stencil && regs.depth_control.stencil_enable && !desc.view_info.is_storage;
-        const auto new_layout = desc.view_info.is_storage
-                                    ? has_stencil ? vk::ImageLayout::eDepthStencilAttachmentOptimal
-                                                  : vk::ImageLayout::eDepthAttachmentOptimal
-                                : stencil_write
-                                    ? vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal
-                                : has_stencil ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
-                                              : vk::ImageLayout::eDepthReadOnlyOptimal;
+            has_stencil && regs.depth_control.stencil_enable && !regs.depth_view.stencil_read_only;
+        const auto new_layout =
+            depth_write ? has_stencil ? vk::ImageLayout::eDepthStencilAttachmentOptimal
+                                       : vk::ImageLayout::eDepthAttachmentOptimal
+            : stencil_write ? vk::ImageLayout::eDepthReadOnlyStencilAttachmentOptimal
+            : has_stencil ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
+                          : vk::ImageLayout::eDepthReadOnlyOptimal;
         image.Transit(new_layout,
                       vk::AccessFlagBits2::eDepthStencilAttachmentWrite |
                           vk::AccessFlagBits2::eDepthStencilAttachmentRead,
@@ -2017,12 +2053,16 @@ void Rasterizer::UpdatePrimitiveState(const bool is_indexed) const {
                topology == vk::PrimitiveTopology::ePatchList;
     };
 
-    const auto prim_restart =
+    auto prim_restart =
         (regs.enable_primitive_restart & 1) != 0 &&
         (instance.IsListRestartSupported() || !is_list_topology(regs.primitive_type));
-    ASSERT_MSG(!is_indexed || !prim_restart || regs.primitive_restart_index == 0xFFFF ||
-                   regs.primitive_restart_index == 0xFFFFFFFF,
-               "Primitive restart index other than -1 is not supported yet");
+    if (is_indexed && prim_restart && regs.primitive_restart_index != 0xFFFF &&
+        regs.primitive_restart_index != 0xFFFFFFFF) {
+        LOG_WARNING(Render_Vulkan,
+                    "Disabling unsupported primitive restart index {:#x} for topology {}",
+                    regs.primitive_restart_index, static_cast<u32>(regs.primitive_type));
+        prim_restart = false;
+    }
 
     const auto cull_mode = LiverpoolToVK::IsPrimitiveCulled(regs.primitive_type)
                                ? LiverpoolToVK::CullMode(regs.polygon_control.CullingMode())

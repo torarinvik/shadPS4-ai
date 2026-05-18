@@ -702,6 +702,22 @@ void Image::CopyImageWithBuffer(Image& src_image, vk::Buffer buffer, u64 offset)
     const u32 num_layers = std::min(src_info.resources.layers, info.resources.layers);
     ASSERT(src_info.resources.layers == info.resources.layers || num_mips == 1);
 
+    for (u32 mip = 0; mip < num_mips; ++mip) {
+        const auto& src_mip = src_info.mips_layout[mip];
+        const auto& dst_mip = info.mips_layout[mip];
+        if (src_mip.offset != dst_mip.offset || src_mip.pitch != dst_mip.pitch ||
+            src_mip.height != dst_mip.height) {
+            LOG_WARNING(Render_Vulkan,
+                        "Skipping buffer-assisted image copy with incompatible mip layout "
+                        "src_addr={:#x} dst_addr={:#x} mip={} src_offset={} dst_offset={} "
+                        "src_pitch={} dst_pitch={} src_height={} dst_height={}",
+                        src_info.guest_address, info.guest_address, mip, src_mip.offset,
+                        dst_mip.offset, src_mip.pitch, dst_mip.pitch, src_mip.height,
+                        dst_mip.height);
+            return;
+        }
+    }
+
     SetBackingSamples(info.num_samples, false);
     src_image.SetBackingSamples(src_info.num_samples);
 
@@ -783,7 +799,7 @@ void Image::CopyMip(Image& src_image, u32 mip, u32 slice) {
     const auto mip_w = std::max(info.size.width >> mip, 1u);
     const auto mip_h = std::max(info.size.height >> mip, 1u);
     const auto mip_d = std::max(info.size.depth >> mip, 1u);
-    const auto [src_layers, dst_layers] = SanitizeCopyLayers(src_info, info, mip_d);
+    const auto [src_layers, dst_layers] = SanitizeCopyLayers(src_info, info, mip_d, 0, slice);
     if (src_layers == 0 || dst_layers == 0) {
         return;
     }
@@ -812,7 +828,7 @@ void Image::CopyMip(Image& src_image, u32 mip, u32 slice) {
             .layerCount = src_layers,
         },
         .dstSubresource{
-            .aspectMask = src_image.aspect_mask,
+            .aspectMask = aspect_mask,
             .mipLevel = mip,
             .baseArrayLayer = slice,
             .layerCount = dst_layers,
@@ -848,6 +864,11 @@ void Image::Resolve(Image& src_image, const VideoCore::SubresourceRange& mrt0_ra
     if (src_layers == 0 || dst_layers == 0) {
         return;
     }
+    const vk::Extent3D resolve_extent = {
+        std::min(src_image.info.size.width, info.size.width),
+        std::min(src_image.info.size.height, info.size.height),
+        1,
+    };
     if (src_image.backing->num_samples == 1) {
         const vk::ImageCopy region = {
             .srcSubresource{
@@ -864,7 +885,7 @@ void Image::Resolve(Image& src_image, const VideoCore::SubresourceRange& mrt0_ra
                 .layerCount = dst_layers,
             },
             .dstOffset = {0, 0, 0},
-            .extent = {info.size.width, info.size.height, 1},
+            .extent = resolve_extent,
         };
         scheduler->CommandBuffer().copyImage(src_image.GetImage(),
                                              vk::ImageLayout::eTransferSrcOptimal, GetImage(),
@@ -885,7 +906,7 @@ void Image::Resolve(Image& src_image, const VideoCore::SubresourceRange& mrt0_ra
                 .layerCount = dst_layers,
             },
             .dstOffset = {0, 0, 0},
-            .extent = {info.size.width, info.size.height, 1},
+            .extent = resolve_extent,
         };
         scheduler->CommandBuffer().resolveImage(src_image.GetImage(),
                                                 vk::ImageLayout::eTransferSrcOptimal, GetImage(),
@@ -897,6 +918,7 @@ void Image::Resolve(Image& src_image, const VideoCore::SubresourceRange& mrt0_ra
 }
 
 void Image::Clear(const vk::ClearValue& clear_value, const VideoCore::SubresourceRange& range) {
+    ASSERT_MSG(!info.props.is_depth, "Use a depth/stencil clear path for depth images");
     const vk::ImageSubresourceRange vk_range = {
         .aspectMask = vk::ImageAspectFlagBits::eColor,
         .baseMipLevel = range.base.level,
@@ -939,8 +961,16 @@ void Image::SetBackingSamples(u32 num_samples, bool copy_backing) {
 
     if (copy_backing) {
         scheduler->EndRendering();
-        ASSERT(info.resources.levels == 1 && info.resources.layers == 1);
+        if (info.resources.levels != 1 || info.resources.layers != 1) {
+            LOG_WARNING(Render_Vulkan,
+                        "Skipping sample backing preservation for layered/mipped image "
+                        "addr={:#x} levels={} layers={}",
+                        info.guest_address, info.resources.levels, info.resources.layers);
+            copy_backing = false;
+        }
+    }
 
+    if (copy_backing) {
         // Transition current backing to shader read layout
         auto barriers =
             GetBarriers(vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits2::eShaderRead,

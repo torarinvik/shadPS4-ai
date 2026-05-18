@@ -96,7 +96,8 @@ ImageViewInfo::ImageViewInfo(const AmdGpu::DepthBuffer& depth_buffer, AmdGpu::De
                              AmdGpu::DepthControl ctl) {
     format = Vulkan::LiverpoolToVK::DepthFormat(depth_buffer.z_info.format,
                                                 depth_buffer.stencil_info.format);
-    is_storage = ctl.depth_write_enable;
+    is_storage = (ctl.depth_write_enable && !view.z_read_only) ||
+                 (ctl.stencil_enable && !view.stencil_read_only);
     range.base.layer = view.slice_start;
     range.extent.layers = view.NumSlices() - range.base.layer;
     type = range.extent.layers > 1 ? AmdGpu::ImageType::Color2DArray : AmdGpu::ImageType::Color2D;

@@ -1,0 +1,68 @@
+const module SafeRangeLimit:
+    U64_MAX: u64 = 0.u64() - 1.u64()
+    PS4_GPU_40_BIT_END: u64 = 0x10000000000
+
+struct SafeRange:
+    begin: u64
+    end: u64
+    ok: bool
+
+def safe_range_invalid(begin: u64) -> SafeRange:
+    return SafeRange(begin, begin, false)
+
+def safe_range_make(begin: u64, size: u64) -> SafeRange:
+    if size > SafeRangeLimit::U64_MAX - begin:
+        return safe_range_invalid(begin)
+    return SafeRange(begin, begin + size, true)
+
+def safe_range_size(range: SafeRange) -> u64:
+    if not range.ok:
+        return 0
+    return range.end - range.begin
+
+def safe_range_is_empty(range: SafeRange) -> bool:
+    if not range.ok:
+        return true
+    return range.begin == range.end
+
+def safe_range_contains_addr(range: SafeRange, addr: u64) -> bool:
+    if not range.ok:
+        return false
+    return addr >= range.begin and addr < range.end
+
+def safe_range_contains_range(outer: SafeRange, inner: SafeRange) -> bool:
+    if not outer.ok or not inner.ok:
+        return false
+    return inner.begin >= outer.begin and inner.end <= outer.end
+
+def safe_range_overlaps(left: SafeRange, right: SafeRange) -> bool:
+    if not left.ok or not right.ok:
+        return false
+    if safe_range_is_empty(left) or safe_range_is_empty(right):
+        return false
+    return left.begin < right.end and right.begin < left.end
+
+def safe_range_intersect(left: SafeRange, right: SafeRange) -> SafeRange:
+    if not safe_range_overlaps(left, right):
+        return safe_range_invalid(left.begin)
+    begin: mutable u64 = left.begin
+    end: mutable u64 = left.end
+    if right.begin > begin:
+        begin <- right.begin
+    if right.end < end:
+        end <- right.end
+    return SafeRange(begin, end, true)
+
+def safe_range_fits_below(begin: u64, size: u64, exclusive_limit: u64) -> bool:
+    range: SafeRange = safe_range_make(begin, size)
+    if not range.ok:
+        return false
+    return range.end <= exclusive_limit
+
+def safe_range_clamp_size_below(begin: u64, size: u64, exclusive_limit: u64) -> u64:
+    if begin >= exclusive_limit:
+        return 0
+    available: u64 = exclusive_limit - begin
+    if size > available:
+        return available
+    return size

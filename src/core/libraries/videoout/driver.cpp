@@ -15,6 +15,10 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 
+#ifdef SHADPS4_ENABLE_ELISA_PORTS
+#include "elisa/native/shadps4_elisa_videoout_validation.h"
+#endif
+
 extern std::unique_ptr<Vulkan::Presenter> presenter;
 extern std::unique_ptr<AmdGpu::Liverpool> liverpool;
 
@@ -54,6 +58,32 @@ constexpr u32 PixelFormatBpp(PixelFormat pixel_format) {
     default:
         return 4;
     }
+}
+
+static int ValidateBufferAttribute(const BufferAttribute* attribute) {
+#ifdef SHADPS4_ENABLE_ELISA_PORTS
+    return static_cast<int>(shadps4_elisa_videoout_validate_attribute(
+        static_cast<u32>(attribute->pixel_format), static_cast<s64>(attribute->tiling_mode),
+        attribute->aspect_ratio, attribute->width, attribute->height, attribute->pitch_in_pixel,
+        attribute->reserved0, attribute->reserved1));
+#else
+    if (!IsSupportedPixelFormat(attribute->pixel_format)) {
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_PIXEL_FORMAT;
+    }
+    if (attribute->reserved0 != 0 || attribute->reserved1 != 0) {
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
+    }
+    if (attribute->aspect_ratio != 0) {
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_ASPECT_RATIO;
+    }
+    if (attribute->width > attribute->pitch_in_pixel) {
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_PITCH;
+    }
+    if (attribute->tiling_mode < TilingMode::Tile || attribute->tiling_mode > TilingMode::Linear) {
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_TILING_MODE;
+    }
+    return ORBIS_OK;
+#endif
 }
 
 VideoOutDriver::VideoOutDriver(u32 width, u32 height) {
@@ -117,12 +147,23 @@ VideoOutPort* VideoOutDriver::GetPort(int handle) {
 
 int VideoOutDriver::RegisterBuffers(VideoOutPort* port, s32 startIndex, void* const* addresses,
                                     s32 bufferNum, const BufferAttribute* attribute) {
-    if (port == nullptr || attribute == nullptr || addresses == nullptr || startIndex < 0 ||
-        bufferNum <= 0 || startIndex >= MaxDisplayBuffers || bufferNum > MaxDisplayBuffers ||
-        startIndex > MaxDisplayBuffers - bufferNum) {
+    const int register_shape_result =
+#ifdef SHADPS4_ENABLE_ELISA_PORTS
+        static_cast<int>(shadps4_elisa_videoout_validate_register_shape(
+            startIndex, bufferNum, attribute != nullptr, addresses != nullptr));
+#else
+        (attribute == nullptr || addresses == nullptr || startIndex < 0 || bufferNum <= 0 ||
+                 startIndex >= MaxDisplayBuffers || bufferNum > MaxDisplayBuffers ||
+                 startIndex > MaxDisplayBuffers - bufferNum
+             ? ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE
+             : ORBIS_OK);
+#endif
+
+    if (port == nullptr || register_shape_result != ORBIS_OK) {
         LOG_ERROR(Lib_VideoOut, "Invalid register buffers request startIndex={}, bufferNum={}",
                   startIndex, bufferNum);
-        return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
+        return register_shape_result != ORBIS_OK ? register_shape_result
+                                                 : ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
     }
 
     const s32 group_index = port->FindFreeGroup();
@@ -136,29 +177,32 @@ int VideoOutDriver::RegisterBuffers(VideoOutPort* port, s32 startIndex, void* co
         return ORBIS_VIDEO_OUT_ERROR_SLOT_OCCUPIED;
     }
 
-    if (!IsSupportedPixelFormat(attribute->pixel_format)) {
+    const int attribute_result = ValidateBufferAttribute(attribute);
+    if (attribute_result == ORBIS_VIDEO_OUT_ERROR_INVALID_PIXEL_FORMAT) {
         LOG_ERROR(Lib_VideoOut, "Invalid pixel format = {:#x}",
                   static_cast<u32>(attribute->pixel_format));
-        return ORBIS_VIDEO_OUT_ERROR_INVALID_PIXEL_FORMAT;
+        return attribute_result;
     }
-
-    if (attribute->reserved0 != 0 || attribute->reserved1 != 0) {
+    if (attribute_result == ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE) {
         LOG_ERROR(Lib_VideoOut, "Invalid reserved members");
-        return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
+        return attribute_result;
     }
-    if (attribute->aspect_ratio != 0) {
+    if (attribute_result == ORBIS_VIDEO_OUT_ERROR_INVALID_ASPECT_RATIO) {
         LOG_ERROR(Lib_VideoOut, "Invalid aspect ratio = {}", attribute->aspect_ratio);
-        return ORBIS_VIDEO_OUT_ERROR_INVALID_ASPECT_RATIO;
+        return attribute_result;
     }
-    if (attribute->width > attribute->pitch_in_pixel) {
+    if (attribute_result == ORBIS_VIDEO_OUT_ERROR_INVALID_PITCH) {
         LOG_ERROR(Lib_VideoOut, "Buffer width {} is larger than pitch {}", attribute->width,
                   attribute->pitch_in_pixel);
-        return ORBIS_VIDEO_OUT_ERROR_INVALID_PITCH;
+        return attribute_result;
     }
-    if (attribute->tiling_mode < TilingMode::Tile || attribute->tiling_mode > TilingMode::Linear) {
+    if (attribute_result == ORBIS_VIDEO_OUT_ERROR_INVALID_TILING_MODE) {
         LOG_ERROR(Lib_VideoOut, "Invalid tilingMode = {}",
                   static_cast<u32>(attribute->tiling_mode));
-        return ORBIS_VIDEO_OUT_ERROR_INVALID_TILING_MODE;
+        return attribute_result;
+    }
+    if (attribute_result != ORBIS_OK) {
+        return attribute_result;
     }
     for (u32 i = 0; i < bufferNum; i++) {
         if (addresses[i] == nullptr) {
@@ -228,29 +272,32 @@ int VideoOutDriver::ChangeBufferAttribute(VideoOutPort* port, s32 attributeIndex
         return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
     }
 
-    if (!IsSupportedPixelFormat(attribute->pixel_format)) {
+    const int attribute_result = ValidateBufferAttribute(attribute);
+    if (attribute_result == ORBIS_VIDEO_OUT_ERROR_INVALID_PIXEL_FORMAT) {
         LOG_ERROR(Lib_VideoOut, "Invalid pixel format = {:#x}",
                   static_cast<u32>(attribute->pixel_format));
-        return ORBIS_VIDEO_OUT_ERROR_INVALID_PIXEL_FORMAT;
+        return attribute_result;
     }
-
-    if (attribute->reserved0 != 0 || attribute->reserved1 != 0) {
+    if (attribute_result == ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE) {
         LOG_ERROR(Lib_VideoOut, "Invalid reserved members");
-        return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
+        return attribute_result;
     }
-    if (attribute->aspect_ratio != 0) {
+    if (attribute_result == ORBIS_VIDEO_OUT_ERROR_INVALID_ASPECT_RATIO) {
         LOG_ERROR(Lib_VideoOut, "Invalid aspect ratio = {}", attribute->aspect_ratio);
-        return ORBIS_VIDEO_OUT_ERROR_INVALID_ASPECT_RATIO;
+        return attribute_result;
     }
-    if (attribute->width > attribute->pitch_in_pixel) {
+    if (attribute_result == ORBIS_VIDEO_OUT_ERROR_INVALID_PITCH) {
         LOG_ERROR(Lib_VideoOut, "Buffer width {} is larger than pitch {}", attribute->width,
                   attribute->pitch_in_pixel);
-        return ORBIS_VIDEO_OUT_ERROR_INVALID_PITCH;
+        return attribute_result;
     }
-    if (attribute->tiling_mode < TilingMode::Tile || attribute->tiling_mode > TilingMode::Linear) {
+    if (attribute_result == ORBIS_VIDEO_OUT_ERROR_INVALID_TILING_MODE) {
         LOG_ERROR(Lib_VideoOut, "Invalid tilingMode = {}",
                   static_cast<u32>(attribute->tiling_mode));
-        return ORBIS_VIDEO_OUT_ERROR_INVALID_TILING_MODE;
+        return attribute_result;
+    }
+    if (attribute_result != ORBIS_OK) {
+        return attribute_result;
     }
 
     LOG_INFO(Lib_VideoOut,

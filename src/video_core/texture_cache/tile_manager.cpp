@@ -23,12 +23,24 @@ struct TilingInfo {
     u32 bank_swizzle;
     u32 num_slices;
     u32 num_mips;
+    u32 total_elements;
     std::array<ImageInfo::MipInfo, 16> mips;
 };
 
 static u32 TilingDispatchGroups(u32 byte_size, u32 num_bits) {
+    if (byte_size == 0 || num_bits == 0) {
+        return 0;
+    }
     const u64 elements = Common::DivCeil(static_cast<u64>(byte_size) * 8, static_cast<u64>(num_bits));
     return static_cast<u32>(Common::DivCeil(elements, 64ULL));
+}
+
+static u32 TilingElementCount(u32 byte_size, u32 num_bits) {
+    if (byte_size == 0 || num_bits == 0) {
+        return 0;
+    }
+    return static_cast<u32>(
+        Common::DivCeil(static_cast<u64>(byte_size) * 8, static_cast<u64>(num_bits)));
 }
 
 TileManager::TileManager(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
@@ -187,7 +199,8 @@ TileManager::Result TileManager::DetileImage(vk::Buffer in_buffer, u32 in_offset
     TilingInfo params{};
     params.bank_swizzle = info.bank_swizzle;
     params.num_slices = info.props.is_volume ? info.size.depth : info.resources.layers;
-    params.num_mips = info.resources.levels;
+    params.num_mips = std::min<u32>(info.resources.levels, params.mips.size());
+    params.total_elements = TilingElementCount(info.guest_size, info.num_bits);
     for (u32 mip = 0; mip < params.num_mips; ++mip) {
         auto& mip_info = params.mips[mip];
         mip_info = info.mips_layout[mip];
@@ -254,6 +267,9 @@ TileManager::Result TileManager::DetileImage(vk::Buffer in_buffer, u32 in_offset
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pl_layout, 0, set_writes);
 
     const auto dim_x = TilingDispatchGroups(info.guest_size, info.num_bits);
+    if (dim_x == 0) {
+        return {out_buffer, 0};
+    }
     cmdbuf.dispatch(dim_x, 1, 1);
     return {out_buffer, 0};
 }
@@ -272,7 +288,9 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     TilingInfo params{};
     params.bank_swizzle = info.bank_swizzle;
     params.num_slices = info.props.is_volume ? info.size.depth : info.resources.layers;
-    params.num_mips = static_cast<u32>(buffer_copies.size());
+    params.num_mips = std::min<u32>(static_cast<u32>(buffer_copies.size()), params.mips.size());
+    const u32 valid_size = std::min(copy_size, info.guest_size);
+    params.total_elements = TilingElementCount(valid_size, info.num_bits);
     for (u32 mip = 0; mip < params.num_mips; ++mip) {
         auto& mip_info = params.mips[mip];
         mip_info = info.mips_layout[mip];
@@ -288,14 +306,13 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
         .range = sizeof(params),
     };
 
-    const u32 valid_size = std::min(copy_size, info.guest_size);
     const auto [temp_buffer, temp_allocation] = GetScratchBuffer(info.guest_size);
     scheduler.DeferOperation([this, temp_buffer, temp_allocation]() {
         vmaDestroyBuffer(instance.GetAllocator(), temp_buffer, temp_allocation);
     });
 
     const auto cmdbuf = scheduler.CommandBuffer();
-    in_image.Download(buffer_copies, temp_buffer, 0, copy_size);
+    in_image.Download(buffer_copies, temp_buffer, 0, valid_size);
 
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, GetTilingPipeline(info, true));
 
@@ -340,6 +357,9 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pl_layout, 0, set_writes);
 
     const auto dim_x = TilingDispatchGroups(valid_size, info.num_bits);
+    if (dim_x == 0) {
+        return;
+    }
     cmdbuf.dispatch(dim_x, 1, 1);
 }
 

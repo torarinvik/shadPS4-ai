@@ -39,6 +39,15 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     std::array<vk::RenderingAttachmentInfo, 8> color_attachments;
     for (u32 i = 0; i < render_state.num_color_attachments; ++i) {
         const auto& cb = render_state.color_attachments[i];
+        if (!cb.image_view) {
+            color_attachments[i] = vk::RenderingAttachmentInfo{
+                .imageView = VK_NULL_HANDLE,
+                .imageLayout = vk::ImageLayout::eUndefined,
+                .loadOp = vk::AttachmentLoadOp::eDontCare,
+                .storeOp = vk::AttachmentStoreOp::eDontCare,
+            };
+            continue;
+        }
         color_attachments[i] = vk::RenderingAttachmentInfo{
             .imageView = cb.image_view,
             .imageLayout = cb.image_layout,
@@ -166,7 +175,7 @@ u64 Scheduler::SubmitExecution(SubmitInfo& info) {
 
     static constexpr std::array<vk::PipelineStageFlags, 3> wait_stage_masks = {
         vk::PipelineStageFlagBits::eAllCommands,
-        vk::PipelineStageFlagBits::eColorAttachmentOutput,
+        vk::PipelineStageFlagBits::eAllCommands,
         vk::PipelineStageFlagBits::eAllCommands,
     };
 

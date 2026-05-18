@@ -33,6 +33,12 @@
       "emit": "c-archive",
       "output": "build/libshadps4_elisa_debugger.a",
       "opt": "O0"
+    },
+    "videoout_validation_abi": {
+      "entry": "src/videoout_validation.elisa",
+      "emit": "c-archive",
+      "output": "build/libshadps4_elisa_videoout_validation.a",
+      "opt": "O0"
     }
   }
 }

@@ -28,6 +28,7 @@ keeping the emulator runnable after every slice.
 | --- | --- | --- | --- | --- |
 | C ABI packaging | `CMakeLists.txt`, `cmake/Elisa.cmake` | `-emit c-archive` targets | ported | Elisa modules build as static archives with checked-in ABI headers and sidecar manifests. |
 | Launch intent smoke/shadow tests | `elisa/native/launch_intent_smoke.cpp` | `elisa/src/launch_intent.elisa` | shadowed | Smoke compares normalized launch intent behavior without changing non-Elisa runtime behavior. |
+| Safe range and VideoOut validation policy | `core/libraries/videoout/*`, address/range helper call sites | `elisa/src/safe_range.elisa`, `elisa/src/videoout_validation.elisa` | shadowed | Pure Elisa helpers now cover overflow-safe exclusive ranges plus VideoOut shape/attribute/index checks; C++ remains authoritative until ABI wiring lands. |
 
 ## Compiler Porting Support
 
@@ -39,12 +40,14 @@ keeping the emulator runnable after every slice.
 | Bounds/provenance/alias safety slices | ported | These safety checks are compiler-enforced enough to dogfood low-level ports. |
 | Progress safety | ported | Budgeted loops/recursion/blocking checks give us pressure tests against runaway code. |
 | C++-style module paths | ported | `module Foo::Bar:` and `Foo::Bar::baz()` parse to existing dotted qualified names internally. |
+| Reusable porting guardrails | shadowed | `safe_range.elisa` and `videoout_validation.elisa` provide tested policy helpers for replacing scattered C++ guard code incrementally. |
 
 ## Planned Next Ports
 
 | Area | C++ Source | Proposed Elisa Module | Status | Why It Is A Good Candidate |
 | --- | --- | --- | --- | --- |
 | Runtime settings internals | `src/launch_pipeline.cpp`, settings classes | `LaunchPipeline` host externs | planned | The orchestration is ported; settings storage/loading still lives in C++ and should stay wrapped until Elisa has enough filesystem/config support. |
+| VideoOut validation ABI | `core/libraries/videoout/driver.cpp`, `video_out.cpp` | `elisa/src/videoout_validation.elisa` | planned | The pure Elisa policy exists; next step is exposing narrow C ABI wrappers and replacing one validation cluster at a time. |
 | Utility command side effects | `src/launch_pipeline.cpp`, BigPicture/settings | `LaunchPipeline` host externs | planned | Routing is ported; Big Picture launch and settings persistence remain native side effects. |
 | Game path normalization | `src/launch_pipeline.cpp` | `LaunchPipeline::normalize_game_path_and_args` | planned | Mostly pure argument policy with clear error cases. |
 | Game checklist/update harness | manual testing workflow | `elisa/src/game_checklist.elisa` or fixtures | planned | Keeps compatibility discoveries structured as we dogfood. |

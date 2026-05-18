@@ -150,11 +150,15 @@ struct Scissor {
     }
 
     u32 GetWidth() const {
-        return static_cast<u32>(Clamp(bottom_right_x) - Clamp(top_left_x));
+        const u16 left = Clamp(top_left_x);
+        const u16 right = Clamp(bottom_right_x);
+        return right > left ? static_cast<u32>(right - left) : 0;
     }
 
     u32 GetHeight() const {
-        return static_cast<u32>(Clamp(bottom_right_y) - Clamp(top_left_y));
+        const u16 top = Clamp(top_left_y);
+        const u16 bottom = Clamp(bottom_right_y);
+        return bottom > top ? static_cast<u32>(bottom - top) : 0;
     }
 };
 
@@ -175,11 +179,11 @@ struct ViewportScissor {
     };
 
     u32 GetWidth() const {
-        return bottom_right_x - top_left_x;
+        return bottom_right_x > top_left_x ? bottom_right_x - top_left_x : 0;
     }
 
     u32 GetHeight() const {
-        return bottom_right_y - top_left_y;
+        return bottom_right_y > top_left_y ? bottom_right_y - top_left_y : 0;
     }
 };
 

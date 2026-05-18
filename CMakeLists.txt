@@ -1199,9 +1199,14 @@ if (SHADPS4_ENABLE_ELISA_PORTS)
         SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/elisa/src/debugger.elisa"
         ABI_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/elisa/native/shadps4_elisa_debugger.h"
         OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/elisa")
+    elisa_add_module(shadps4_elisa_videoout_validation
+        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/elisa/src/videoout_validation.elisa"
+        ABI_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/elisa/native/shadps4_elisa_videoout_validation.h"
+        OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/elisa")
     target_link_libraries(shadps4 PRIVATE shadps4_elisa_main)
     target_link_libraries(shadps4 PRIVATE shadps4_elisa_launch_intent)
     target_link_libraries(shadps4 PRIVATE shadps4_elisa_debugger)
+    target_link_libraries(shadps4 PRIVATE shadps4_elisa_videoout_validation)
     target_link_libraries(shadps4 PRIVATE shadps4_elisa_native_bridge)
     target_compile_definitions(shadps4 PRIVATE SHADPS4_ENABLE_ELISA_PORTS=1)
 
