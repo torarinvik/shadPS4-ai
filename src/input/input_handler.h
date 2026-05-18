@@ -387,7 +387,7 @@ public:
                 keys[2] = k2;
             } else {
                 keys[1] = k2;
-                keys[3] = k1;
+                keys[2] = k1;
             }
         }
     }
@@ -457,12 +457,17 @@ public:
         axis = a;
         new_param = new s16(0);
         old_param = 0;
+        old_button_state = false;
+        new_button_state = false;
+        state_changed = false;
         positive_axis = p;
         gamepad_id = 0;
     }
-    ControllerOutput(const ControllerOutput& o) : button(o.button), axis(o.axis) {
-        new_param = new s16(*o.new_param);
-    }
+    ControllerOutput(const ControllerOutput& o)
+        : button(o.button), axis(o.axis), gamepad_id(o.gamepad_id), old_param(o.old_param),
+          new_param(new s16(*o.new_param)), old_button_state(o.old_button_state),
+          new_button_state(o.new_button_state), state_changed(o.state_changed),
+          positive_axis(o.positive_axis) {}
     ~ControllerOutput() {
         delete new_param;
     }
@@ -493,13 +498,12 @@ public:
     u32 axis_param;
     InputID toggle;
 
-    BindingConnection(InputBinding b, ControllerOutput* out, u32 param = 0, InputID t = InputID()) {
-        binding = b;
-        axis_param = param;
-        output = out;
-        toggle = t;
-    }
+    BindingConnection(InputBinding b, ControllerOutput* out, u32 param = 0, InputID t = InputID())
+        : binding(b), output(out), axis_param(param), toggle(t) {}
     BindingConnection& operator=(const BindingConnection& o) {
+        if (this == &o) {
+            return *this;
+        }
         binding = o.binding;
         output = o.output;
         axis_param = o.axis_param;

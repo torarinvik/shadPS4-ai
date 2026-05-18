@@ -51,8 +51,9 @@ void NotificationsUI::Draw() {
 
     elapsed_time += io.DeltaTime;
     float progress = std::min(elapsed_time / animation_duration, 1.0f);
-    float final_pos_x, start_x;
-    float height;
+    float final_pos_x = io.DisplaySize.x - window_size.x - 20 * AdjustWidth;
+    float start_x = io.DisplaySize.x;
+    float height = 20 * AdjustHeight;
 
     if (currentInfo.pos == position::TopLeft) {
         start_x = -window_size.x;
