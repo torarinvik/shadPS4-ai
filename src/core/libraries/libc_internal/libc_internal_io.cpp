@@ -25,11 +25,39 @@ s32 PS4_SYSV_ABI internal_snprintf(char* s, u64 n, VA_ARGS) {
     return snprintf_ctx(s, n, &ctx);
 }
 
+s32 PS4_SYSV_ABI internal_printf(VA_ARGS) {
+    VA_CTX(ctx);
+    return printf_ctx(&ctx);
+}
+
+s32 PS4_SYSV_ABI internal_vprintf(const char* format, Common::VaList* args) {
+    if (!format || !args) {
+        return -1;
+    }
+    char buffer[1024];
+    const int result = _vsnprintf(_out_buffer, buffer, format, args);
+    std::printf("%s", buffer);
+    return result;
+}
+
+s32 PS4_SYSV_ABI internal_vsnprintf(char* s, u64 n, const char* format, Common::VaList* args) {
+    if (!s || n == 0 || !format || !args) {
+        return -1;
+    }
+    return vsnprintf_ctx(s, n, format, args);
+}
+
 std::map<s32, OrbisFILE*> g_files{};
 // Constants for tracking accurate file indexes.
 // Since the file struct is exposed to the application, accuracy is important.
 static constexpr s32 g_initial_files = 5;
 static constexpr s32 g_max_files = 0x100;
+
+static OrbisFILE g_stdout_file{
+    ._Mode = 0x2082,
+    ._Idx = 1,
+    ._Handle = 1,
+};
 
 OrbisFILE* PS4_SYSV_ABI internal__Fofind() {
     u64 index = g_initial_files;
@@ -465,6 +493,11 @@ s32 PS4_SYSV_ABI internal_fclose(OrbisFILE* file) {
 
 void RegisterlibSceLibcInternalIo(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("eLdDw6l0-bU", "libSceLibcInternal", 1, "libSceLibcInternal", internal_snprintf);
+    LIB_FUNCTION("hcuQgD53UxM", "libSceLibcInternal", 1, "libSceLibcInternal", internal_printf);
+    LIB_FUNCTION("GMpvxPFW924", "libSceLibcInternal", 1, "libSceLibcInternal", internal_vprintf);
+    LIB_FUNCTION("Q2V+iqvjgC0", "libSceLibcInternal", 1, "libSceLibcInternal",
+                 internal_vsnprintf);
+    LIB_OBJ("2sWzhYqFH4E", "libSceLibcInternal", 1, "libSceLibcInternal", &g_stdout_file);
     LIB_FUNCTION("MUjC4lbHrK4", "libSceLibcInternal", 1, "libSceLibcInternal", internal_fflush);
     LIB_FUNCTION("xGT4Mc55ViQ", "libSceLibcInternal", 1, "libSceLibcInternal", internal__Fofind);
     LIB_FUNCTION("dREVnZkAKRE", "libSceLibcInternal", 1, "libSceLibcInternal", internal__Foprep);
