@@ -10,6 +10,9 @@
 
 namespace Shader::Optimization {
 
+template <typename>
+constexpr bool AlwaysFalse = false;
+
 template <typename T>
 [[nodiscard]] T Arg(const IR::Value& value) {
     if constexpr (std::is_same_v<T, bool>) {
@@ -24,6 +27,8 @@ template <typename T>
         return value.U64();
     } else if constexpr (std::is_same_v<T, s64>) {
         return static_cast<s64>(value.U64());
+    } else {
+        static_assert(AlwaysFalse<T>, "Unsupported immediate argument type");
     }
 }
 

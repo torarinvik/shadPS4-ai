@@ -209,6 +209,9 @@ s32 Linker::LoadAndStartModule(const std::filesystem::path& path, u64 args, cons
                                int* pRes) {
     u32 handle = FindByName(path);
     if (handle != -1) {
+        if (pRes) {
+            *pRes = ORBIS_OK;
+        }
         return handle;
     }
     handle = LoadModule(path, true);

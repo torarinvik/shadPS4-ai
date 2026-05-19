@@ -247,7 +247,7 @@ struct RuntimeInfo {
     };
 
     void Initialize(Stage stage_) {
-        memset(this, 0, sizeof(*this));
+        *this = RuntimeInfo{};
         stage = stage_;
     }
 

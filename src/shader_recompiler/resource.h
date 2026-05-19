@@ -161,7 +161,10 @@ struct PushData {
 
     void AddOffset(u32 binding, u32 offset) {
         ASSERT(offset < 256 && binding < buf_offsets.size());
-        buf_offsets[binding] = offset;
+        if (binding >= buf_offsets.size()) {
+            return;
+        }
+        buf_offsets[binding] = static_cast<u8>(std::min(offset, 255u));
     }
 };
 static_assert(sizeof(PushData) <= 128,

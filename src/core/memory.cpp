@@ -49,6 +49,21 @@ static bool RelocatedAccessViolationHandler(void* context, void* fault_address) 
     return Memory::Instance()->HandleRelocatedAccessFault(context, fault_address);
 }
 
+static bool UseStickyAppleRelocatedRegisters() {
+#if defined(__APPLE__) && defined(ARCH_X86_64)
+    static const bool enabled = [] {
+        const char* value = std::getenv("SHADPS4_STICKY_APPLE_FIXED_RELOCATION");
+        // Leaving relocated host addresses in guest registers is fast, but it changes guest
+        // semantics after the faulting instruction. Keep it opt-in until we have instruction
+        // emulation that preserves the original register values without single-stepping.
+        return value != nullptr && std::string_view{value} == "1";
+    }();
+    return enabled;
+#else
+    return false;
+#endif
+}
+
 static bool IsAppleFixedRelocationEnabled() {
     static const bool enabled = [] {
         const char* value = std::getenv("SHADPS4_ALLOW_APPLE_FIXED_RELOCATION");
@@ -852,7 +867,11 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
         MergeAdjacent(vma_map, new_vma_handle);
     }
 
-    *out_addr = std::bit_cast<void*>(mapped_addr);
+    // PS4 fixed mappings report the requested address back to the guest. On macOS/x86_64 we may
+    // have to host-map that range elsewhere, but exposing the host relocation to guest code mixes
+    // original and relocated pointers in guest allocator state. Keep the guest contract intact and
+    // let ResolveRelocatedAddress translate when the host touches the backing mapping.
+    *out_addr = std::bit_cast<void*>(relocated_mapping ? relocated_from : mapped_addr);
     if (type != VMAType::Reserved && type != VMAType::PoolReserved) {
         // Flexible address space mappings were performed while finding direct memory areas.
         if (type != VMAType::Flexible) {
@@ -1049,6 +1068,7 @@ s32 MemoryManager::UnmapMemory(VAddr virtual_addr, u64 size) {
     // Align address and size appropriately
     virtual_addr = Common::AlignDown(virtual_addr, 16_KB);
     size = Common::AlignUp(size, 16_KB);
+    virtual_addr = ResolveRelocatedAddress(virtual_addr);
     if (!IsValidMapping(virtual_addr, size)) {
         LOG_ERROR(Kernel_Vmm, "Attempted to unmap invalid address range: addr = {:#x}, size = {:#x}",
                   virtual_addr, size);
@@ -1739,6 +1759,267 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
         return address;
     };
 
+    const auto register_storage = [&](ZydisRegister reg) -> u64* {
+        switch (ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_64, reg)) {
+        case ZYDIS_REGISTER_RAX:
+            return &state.__rax;
+        case ZYDIS_REGISTER_RBX:
+            return &state.__rbx;
+        case ZYDIS_REGISTER_RCX:
+            return &state.__rcx;
+        case ZYDIS_REGISTER_RDX:
+            return &state.__rdx;
+        case ZYDIS_REGISTER_RDI:
+            return &state.__rdi;
+        case ZYDIS_REGISTER_RSI:
+            return &state.__rsi;
+        case ZYDIS_REGISTER_RBP:
+            return &state.__rbp;
+        case ZYDIS_REGISTER_RSP:
+            return &state.__rsp;
+        case ZYDIS_REGISTER_R8:
+            return &state.__r8;
+        case ZYDIS_REGISTER_R9:
+            return &state.__r9;
+        case ZYDIS_REGISTER_R10:
+            return &state.__r10;
+        case ZYDIS_REGISTER_R11:
+            return &state.__r11;
+        case ZYDIS_REGISTER_R12:
+            return &state.__r12;
+        case ZYDIS_REGISTER_R13:
+            return &state.__r13;
+        case ZYDIS_REGISTER_R14:
+            return &state.__r14;
+        case ZYDIS_REGISTER_R15:
+            return &state.__r15;
+        default:
+            return nullptr;
+        }
+    };
+
+    const auto register_width = [](ZydisRegister reg) -> u32 {
+        switch (reg) {
+        case ZYDIS_REGISTER_AH:
+        case ZYDIS_REGISTER_BH:
+        case ZYDIS_REGISTER_CH:
+        case ZYDIS_REGISTER_DH:
+            return 0;
+        default:
+            return ZydisRegisterGetWidth(ZYDIS_MACHINE_MODE_LONG_64, reg);
+        }
+    };
+
+    const auto read_register_value = [&](ZydisRegister reg, u64& value) -> bool {
+        auto* slot = register_storage(reg);
+        const u32 width = register_width(reg);
+        if (slot == nullptr || width == 0 || width > 64) {
+            return false;
+        }
+        if (width == 64) {
+            value = *slot;
+        } else {
+            value = *slot & ((1ULL << width) - 1);
+        }
+        return true;
+    };
+
+    const auto write_register_value = [&](ZydisRegister reg, u64 value) -> bool {
+        auto* slot = register_storage(reg);
+        const u32 width = register_width(reg);
+        if (slot == nullptr || width == 0 || width > 64) {
+            return false;
+        }
+        if (width == 64) {
+            *slot = value;
+        } else if (width == 32) {
+            *slot = static_cast<u32>(value);
+        } else {
+            const u64 mask = (1ULL << width) - 1;
+            *slot = (*slot & ~mask) | (value & mask);
+        }
+        return true;
+    };
+
+    const auto operand_byte_size = [](const ZydisDecodedOperand& operand) -> u32 {
+        return operand.size / 8;
+    };
+
+    const auto value_mask = [](u32 bytes) -> u64 {
+        return bytes >= sizeof(u64) ? std::numeric_limits<u64>::max() : ((1ULL << (bytes * 8)) - 1);
+    };
+
+    const auto has_even_parity = [](u8 value) -> bool {
+        value ^= value >> 4;
+        value &= 0xf;
+        return ((0x6996 >> value) & 1) == 0;
+    };
+
+    static constexpr u64 X86CarryFlag = 0x001;
+    static constexpr u64 X86ParityFlag = 0x004;
+    static constexpr u64 X86AdjustFlag = 0x010;
+    static constexpr u64 X86ZeroFlag = 0x040;
+    static constexpr u64 X86SignFlag = 0x080;
+    static constexpr u64 X86OverflowFlag = 0x800;
+
+    const auto set_status_flag = [&](u64 flag, bool set) {
+        if (set) {
+            state.__rflags |= flag;
+        } else {
+            state.__rflags &= ~flag;
+        }
+    };
+
+    const auto set_logic_flags = [&](u64 result, u32 bytes) {
+        const u64 mask = value_mask(bytes);
+        const u64 sign = 1ULL << (bytes * 8 - 1);
+        result &= mask;
+        set_status_flag(X86CarryFlag, false);
+        set_status_flag(X86OverflowFlag, false);
+        set_status_flag(X86AdjustFlag, false);
+        set_status_flag(X86ZeroFlag, result == 0);
+        set_status_flag(X86SignFlag, (result & sign) != 0);
+        set_status_flag(X86ParityFlag, has_even_parity(static_cast<u8>(result)));
+    };
+
+    const auto set_sub_flags = [&](u64 lhs, u64 rhs, u64 result, u32 bytes) {
+        const u64 mask = value_mask(bytes);
+        const u64 sign = 1ULL << (bytes * 8 - 1);
+        lhs &= mask;
+        rhs &= mask;
+        result &= mask;
+        set_status_flag(X86CarryFlag, lhs < rhs);
+        set_status_flag(X86AdjustFlag, ((lhs ^ rhs ^ result) & 0x10) != 0);
+        set_status_flag(X86ZeroFlag, result == 0);
+        set_status_flag(X86SignFlag, (result & sign) != 0);
+        set_status_flag(X86OverflowFlag, ((lhs ^ rhs) & (lhs ^ result) & sign) != 0);
+        set_status_flag(X86ParityFlag, has_even_parity(static_cast<u8>(result)));
+    };
+
+    const auto set_inc_flags = [&](u64 lhs, u64 result, u32 bytes) {
+        const u64 mask = value_mask(bytes);
+        const u64 sign = 1ULL << (bytes * 8 - 1);
+        lhs &= mask;
+        result &= mask;
+        set_status_flag(X86AdjustFlag, ((lhs ^ 1 ^ result) & 0x10) != 0);
+        set_status_flag(X86ZeroFlag, result == 0);
+        set_status_flag(X86SignFlag, (result & sign) != 0);
+        set_status_flag(X86OverflowFlag, lhs == (sign - 1));
+        set_status_flag(X86ParityFlag, has_even_parity(static_cast<u8>(result)));
+    };
+
+    const auto read_operand_value = [&](const ZydisDecodedOperand& operand, u64& value) -> bool {
+        if (operand.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+            return read_register_value(operand.reg.value, value);
+        }
+        if (operand.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+            value = operand.imm.value.u;
+            return true;
+        }
+        return false;
+    };
+
+    const auto emulate_relocated_mov = [&]() -> bool {
+        if (instruction.mnemonic != ZYDIS_MNEMONIC_MOV || instruction.operand_count < 2) {
+            return false;
+        }
+
+        auto& dst = operands[0];
+        auto& src = operands[1];
+        if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY && calc_address(dst) == fault_addr) {
+            const u32 bytes = operand_byte_size(dst);
+            if (bytes == 0 || bytes > sizeof(u64)) {
+                return false;
+            }
+
+            u64 value = 0;
+            if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                if (!read_register_value(src.reg.value, value)) {
+                    return false;
+                }
+            } else if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+                value = src.imm.value.u;
+            } else {
+                return false;
+            }
+
+            std::memcpy(reinterpret_cast<void*>(translated_fault_addr), &value, bytes);
+            state.__rip += instruction.length;
+            LOG_TRACE(Kernel_Vmm, "Emulated relocated MOV store at {:#x} -> {:#x}, {} bytes",
+                      fault_addr, translated_fault_addr, bytes);
+            return true;
+        }
+
+        if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && calc_address(src) == fault_addr &&
+            dst.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+            const u32 bytes = operand_byte_size(src);
+            if (bytes == 0 || bytes > sizeof(u64)) {
+                return false;
+            }
+
+            u64 value = 0;
+            std::memcpy(&value, reinterpret_cast<const void*>(translated_fault_addr), bytes);
+            if (!write_register_value(dst.reg.value, value)) {
+                return false;
+            }
+
+            state.__rip += instruction.length;
+            LOG_TRACE(Kernel_Vmm, "Emulated relocated MOV load at {:#x} -> {:#x}, {} bytes",
+                      fault_addr, translated_fault_addr, bytes);
+            return true;
+        }
+
+        return false;
+    };
+
+    const auto emulate_relocated_flags_op = [&]() -> bool {
+        if (instruction.operand_count == 0 || operands[0].type != ZYDIS_OPERAND_TYPE_MEMORY ||
+            calc_address(operands[0]) != fault_addr) {
+            return false;
+        }
+
+        auto& dst = operands[0];
+        const u32 bytes = operand_byte_size(dst);
+        if (bytes == 0 || bytes > sizeof(u64)) {
+            return false;
+        }
+
+        u64 lhs = 0;
+        std::memcpy(&lhs, reinterpret_cast<const void*>(translated_fault_addr), bytes);
+
+        if (instruction.mnemonic == ZYDIS_MNEMONIC_CMP && instruction.operand_count >= 2) {
+            u64 rhs = 0;
+            if (!read_operand_value(operands[1], rhs)) {
+                return false;
+            }
+            set_sub_flags(lhs, rhs, lhs - rhs, bytes);
+            state.__rip += instruction.length;
+            return true;
+        }
+
+        if (instruction.mnemonic == ZYDIS_MNEMONIC_OR && instruction.operand_count >= 2) {
+            u64 rhs = 0;
+            if (!read_operand_value(operands[1], rhs)) {
+                return false;
+            }
+            const u64 result = (lhs | rhs) & value_mask(bytes);
+            std::memcpy(reinterpret_cast<void*>(translated_fault_addr), &result, bytes);
+            set_logic_flags(result, bytes);
+            state.__rip += instruction.length;
+            return true;
+        }
+
+        if (instruction.mnemonic == ZYDIS_MNEMONIC_INC) {
+            const u64 result = (lhs + 1) & value_mask(bytes);
+            std::memcpy(reinterpret_cast<void*>(translated_fault_addr), &result, bytes);
+            set_inc_flags(lhs, result, bytes);
+            state.__rip += instruction.length;
+            return true;
+        }
+
+        return false;
+    };
+
     const auto patch_register_direct = [&](ZydisRegister reg,
                                            const ZydisDecodedOperand& operand) -> bool {
         auto [name, slot] = register_slot(reg);
@@ -1755,6 +2036,13 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
         if (patched_address != translated_fault_addr) {
             *slot = old_value;
             return false;
+        }
+        if (UseStickyAppleRelocatedRegisters()) {
+            LOG_TRACE(Kernel_Vmm,
+                      "Kept {} relocated from guest pointer {:#x} to host-mapped address {:#x} "
+                      "for fault at {:#x} -> {:#x}",
+                      name, old_value, new_value, fault_addr, translated_fault_addr);
+            return true;
         }
         relocated_register_restore = RelocatedRegisterRestore{
             .active = true,
@@ -1795,6 +2083,14 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
         if (patched_address != translated_fault_addr) {
             *slot = old_value;
             return false;
+        }
+        if (UseStickyAppleRelocatedRegisters()) {
+            LOG_TRACE(Kernel_Vmm,
+                      "Kept {} adjusted by relocation delta {:#x}: {:#x} -> {:#x} for fault at "
+                      "{:#x} -> {:#x}",
+                      name, register_delta, old_value, new_value, fault_addr,
+                      translated_fault_addr);
+            return true;
         }
         relocated_register_restore = RelocatedRegisterRestore{
             .active = true,
@@ -1849,6 +2145,12 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
         const auto& operand = operands[i];
         if (operand.type != ZYDIS_OPERAND_TYPE_MEMORY || calc_address(operand) != fault_addr) {
             continue;
+        }
+        if (emulate_relocated_mov()) {
+            return true;
+        }
+        if (emulate_relocated_flags_op()) {
+            return true;
         }
         if (operand.mem.base != ZYDIS_REGISTER_NONE &&
             operand.mem.base != ZYDIS_REGISTER_RIP &&

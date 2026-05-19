@@ -219,7 +219,7 @@ s32 PS4_SYSV_ABI sceCameraGetConfig(s32 handle, OrbisCameraConfig* config) {
     config->configType = ORBIS_CAMERA_CONFIG_TYPE1;
     config->sizeThis = 0;
 
-    OrbisCameraConfigExtention default_extension;
+    OrbisCameraConfigExtention default_extension{};
     default_extension.format.formatLevel0 = ORBIS_CAMERA_FORMAT_YUV422;
     default_extension.format.formatLevel1 = ORBIS_CAMERA_SCALE_FORMAT_Y8;
     default_extension.format.formatLevel2 = ORBIS_CAMERA_SCALE_FORMAT_Y8;

@@ -429,3 +429,5 @@ result
 /Games
 /screenshot_logs
 /build-codex-make
+/codeql-db
+cppcheck-report.txt

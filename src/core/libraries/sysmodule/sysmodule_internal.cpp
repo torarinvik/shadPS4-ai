@@ -126,6 +126,9 @@ s32 loadModuleInternal(s32 index, s32 argc, const void* argv, s32* res_out) {
     OrbisSysmoduleModuleInternal& mod = g_modules_array[index];
     if (mod.is_loaded > 0) {
         mod.is_loaded++;
+        if (res_out != nullptr) {
+            *res_out = ORBIS_OK;
+        }
         return ORBIS_OK;
     }
 

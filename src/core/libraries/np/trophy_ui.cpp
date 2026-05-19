@@ -195,8 +195,10 @@ void TrophyUI::Draw() {
     elapsed_time += io.DeltaTime;
     float progress = std::min(elapsed_time / animation_duration, 1.0f);
 
-    float final_pos_x, start_x;
-    float final_pos_y, start_y;
+    float start_x = (io.DisplaySize.x - window_size.x) * 0.5f;
+    float start_y = -window_size.y;
+    float final_pos_x = start_x;
+    float final_pos_y = 20 * AdjustHeight;
 
     if (side == "top") {
         start_x = (io.DisplaySize.x - window_size.x) * 0.5f;

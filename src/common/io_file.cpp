@@ -164,6 +164,7 @@ IOFile::IOFile(IOFile&& other) noexcept {
     std::swap(file_access_mode, other.file_access_mode);
     std::swap(file_type, other.file_type);
     std::swap(file, other.file);
+    std::swap(file_mapping, other.file_mapping);
 }
 
 IOFile& IOFile::operator=(IOFile&& other) noexcept {
@@ -171,6 +172,7 @@ IOFile& IOFile::operator=(IOFile&& other) noexcept {
     std::swap(file_access_mode, other.file_access_mode);
     std::swap(file_type, other.file_type);
     std::swap(file, other.file);
+    std::swap(file_mapping, other.file_mapping);
     return *this;
 }
 

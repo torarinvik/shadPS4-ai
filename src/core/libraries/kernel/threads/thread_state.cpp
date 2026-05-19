@@ -103,10 +103,7 @@ Pthread* ThreadState::Alloc(Pthread* curthread) {
         tcb = TcbCtor(thread, 1 /* initial tls */);
     }
     if (tcb != nullptr) {
-        // Initialize thread struct memory to 0. This is safe since it will be constructed
-        // immediately after.
-        std::memset(static_cast<void*>(thread), 0, sizeof(Pthread));
-        std::construct_at(thread);
+        new (thread) Pthread{};
         thread->tcb = tcb;
         thread->sleepqueue = new SleepQueue{};
     } else {

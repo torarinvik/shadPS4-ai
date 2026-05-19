@@ -802,6 +802,9 @@ vk::Format DepthFormat(DepthBuffer::ZFormat z_format, DepthBuffer::StencilFormat
         });
     ASSERT_MSG(format != formats.end(), "Unknown z_format={} and stencil_format={}",
                static_cast<u32>(z_format), static_cast<u32>(stencil_format));
+    if (format == formats.end()) {
+        return vk::Format::eUndefined;
+    }
     return format->vk_format;
 }
 

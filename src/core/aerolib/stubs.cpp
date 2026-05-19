@@ -5,6 +5,10 @@
 #include "core/aerolib/aerolib.h"
 #include "core/aerolib/stubs.h"
 
+#include <mutex>
+#include <string>
+#include <unordered_map>
+
 namespace Core::AeroLib {
 
 // Helper to provide stub implementations for missing functions
@@ -29,6 +33,8 @@ static u64 UnknownStub() {
 
 static const NidEntry* stub_nids[MAX_STUBS];
 static std::string stub_nids_unknown[MAX_STUBS];
+static std::mutex stub_mutex;
+static std::unordered_map<std::string, u64> stub_cache;
 
 static u64 CommonStub(int stub_index, void* addr) {
     auto entry = stub_nids[stub_index];
@@ -56,6 +62,11 @@ constexpr auto stub_handlers = MakeStubArray(std::make_index_sequence<MAX_STUBS>
 static u32 UsedStubEntries;
 
 u64 GetStub(const char* nid) {
+    std::scoped_lock lock{stub_mutex};
+    if (const auto it = stub_cache.find(nid); it != stub_cache.end()) {
+        return it->second;
+    }
+
     if (UsedStubEntries >= MAX_STUBS) {
         return (u64)&UnknownStub;
     }
@@ -67,7 +78,9 @@ u64 GetStub(const char* nid) {
         stub_nids[UsedStubEntries] = entry;
     }
 
-    return (u64)stub_handlers[UsedStubEntries++];
+    const u64 handler = (u64)stub_handlers[UsedStubEntries++];
+    stub_cache.emplace(nid, handler);
+    return handler;
 }
 
 } // namespace Core::AeroLib

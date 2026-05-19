@@ -120,7 +120,7 @@ Sorted by approximate PS4 storage size, largest to smallest. Sizes are rough and
 | [ ] | 40 | Prey |
 | [ ] | 40 | RESIDENT EVIL RESISTANCE |
 | [ ] | 39 | KILLZONE™ SHADOW FALL |
-|          |           |                                                     |
+| [X] |           | Madden NFL 24 |
 |          |           |                                                     |
 | [ ] | 35 | Until Dawn™ |
 | [ ] | 35 | Until Dawn™ |
