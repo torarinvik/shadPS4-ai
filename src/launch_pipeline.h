@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "launch_intent_shadow.h"
+#include "launch_cli.h"
 
 namespace LaunchPipeline {
 
@@ -32,6 +32,6 @@ void RunEmulator(const char* executable_name, bool wait_for_debugger,
                  const std::vector<std::string>& game_args,
                  const std::optional<std::filesystem::path>& override_root);
 
-int RunParsedLaunch(const char* executable_name, LaunchIntent::CliState state);
+int RunParsedLaunch(const char* executable_name, LaunchCli::CliState state);
 
 } // namespace LaunchPipeline

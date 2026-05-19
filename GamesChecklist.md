@@ -208,13 +208,13 @@ Sorted by approximate PS4 storage size, largest to smallest. Sizes are rough and
 | [ ] | 30 | Spyro Reignited Trilogy |
 | [ ] | 28 | MediEvil |
 | [ ] | 28 | Concrete Genie |
-| [ ] | 27 | Diablo III: Reaper of Souls – Ultimate Evil Edition |
-| [ ] | 26 | Ratchet & Clank™ |
-| [ ] | 26 | RESIDENT EVIL 2 |
-| [ ] | 25 | RESIDENT EVIL 7 biohazard |
+| [X ] | 25.7 | Diablo III: Reaper of Souls – Ultimate Evil Edition |
+| [ Unavailable ] | ? | Ratchet & Clank™ |
+| [ X] | 21.6 | RESIDENT EVIL 2 |
+| [ Unavailable] | ? | RESIDENT EVIL 7 biohazard |
 | [x] | 25 | Need for Speed™ |
 | [Unavailable] | 23.78 | Tony Hawk's™ Pro Skater™ 1 + 2 |
-| [ ] | 23 | LEFT ALIVE |
+| [ X] | 18.6 | LEFT ALIVE |
 | [Unavailable] | 18 | Chicken Police |
 | [Unavailable] | 16 | ASTRO BOT Rescue Mission |
 | [Unavailable] | 15 | Moss |

@@ -14,10 +14,6 @@
 #include "core/platform.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 
-#ifdef SHADPS4_ENABLE_ELISA_PORTS
-#include "elisa/native/shadps4_elisa_videoout_validation.h"
-#endif
-
 extern std::unique_ptr<Vulkan::Presenter> presenter;
 
 namespace Libraries::VideoOut {
@@ -172,11 +168,7 @@ s32 PS4_SYSV_ABI sceVideoOutSetFlipRate(s32 handle, s32 rate) {
         return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
     }
     const s32 validation_result =
-#ifdef SHADPS4_ENABLE_ELISA_PORTS
-        static_cast<s32>(shadps4_elisa_videoout_validate_flip_rate(rate));
-#else
-        (rate < 0 || rate > 60 ? ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE : ORBIS_OK);
-#endif
+        rate < 0 || rate > 60 ? ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE : ORBIS_OK;
     if (validation_result != ORBIS_OK) {
         LOG_ERROR(Lib_VideoOut, "Invalid flip rate = {}", rate);
         return validation_result;

@@ -25,9 +25,7 @@
 #include "common/polyfill_thread.h"
 #include "common/scm_rev.h"
 #include "common/singleton.h"
-#ifndef SHADPS4_ENABLE_ELISA_PORTS
 #include "core/debugger.h"
-#endif
 #include "core/devtools/widget/module_list.h"
 #include "core/emulator_settings.h"
 #include "core/emulator_state.h"
@@ -44,10 +42,6 @@
 #include "emulator.h"
 #include "video_core/cache_storage.h"
 #include "video_core/renderdoc.h"
-
-#ifdef SHADPS4_ENABLE_ELISA_PORTS
-#include "elisa/native/shadps4_elisa_debugger.h"
-#endif
 
 #ifdef _WIN32
 #include <WinSock2.h>
@@ -66,22 +60,11 @@ namespace Core {
 namespace {
 
 int CurrentPidForRestart() {
-#ifdef SHADPS4_ENABLE_ELISA_PORTS
-    return static_cast<int>(shadps4_elisa_current_pid());
-#else
     return Debugger::GetCurrentPid();
-#endif
 }
 
 void WaitForDebuggerAttachForRun() {
-#ifdef SHADPS4_ENABLE_ELISA_PORTS
-    constexpr std::uint32_t poll_ms = 200;
-    constexpr std::int64_t max_polls = -1;
-    std::cerr << "Waiting for debugger to attach..." << std::endl;
-    shadps4_elisa_wait_for_debugger_attach(poll_ms, max_polls);
-#else
     Debugger::WaitForDebuggerAttach();
-#endif
 }
 
 } // namespace

@@ -15,10 +15,6 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 
-#ifdef SHADPS4_ENABLE_ELISA_PORTS
-#include "elisa/native/shadps4_elisa_videoout_validation.h"
-#endif
-
 extern std::unique_ptr<Vulkan::Presenter> presenter;
 extern std::unique_ptr<AmdGpu::Liverpool> liverpool;
 
@@ -61,12 +57,6 @@ constexpr u32 PixelFormatBpp(PixelFormat pixel_format) {
 }
 
 static int ValidateBufferAttribute(const BufferAttribute* attribute) {
-#ifdef SHADPS4_ENABLE_ELISA_PORTS
-    return static_cast<int>(shadps4_elisa_videoout_validate_attribute(
-        static_cast<u32>(attribute->pixel_format), static_cast<s64>(attribute->tiling_mode),
-        attribute->aspect_ratio, attribute->width, attribute->height, attribute->pitch_in_pixel,
-        attribute->reserved0, attribute->reserved1));
-#else
     if (!IsSupportedPixelFormat(attribute->pixel_format)) {
         return ORBIS_VIDEO_OUT_ERROR_INVALID_PIXEL_FORMAT;
     }
@@ -83,7 +73,6 @@ static int ValidateBufferAttribute(const BufferAttribute* attribute) {
         return ORBIS_VIDEO_OUT_ERROR_INVALID_TILING_MODE;
     }
     return ORBIS_OK;
-#endif
 }
 
 VideoOutDriver::VideoOutDriver(u32 width, u32 height) {
@@ -148,16 +137,11 @@ VideoOutPort* VideoOutDriver::GetPort(int handle) {
 int VideoOutDriver::RegisterBuffers(VideoOutPort* port, s32 startIndex, void* const* addresses,
                                     s32 bufferNum, const BufferAttribute* attribute) {
     const int register_shape_result =
-#ifdef SHADPS4_ENABLE_ELISA_PORTS
-        static_cast<int>(shadps4_elisa_videoout_validate_register_shape(
-            startIndex, bufferNum, attribute != nullptr, addresses != nullptr));
-#else
         (attribute == nullptr || addresses == nullptr || startIndex < 0 || bufferNum <= 0 ||
                  startIndex >= MaxDisplayBuffers || bufferNum > MaxDisplayBuffers ||
                  startIndex > MaxDisplayBuffers - bufferNum
              ? ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE
              : ORBIS_OK);
-#endif
 
     if (port == nullptr || register_shape_result != ORBIS_OK) {
         LOG_ERROR(Lib_VideoOut, "Invalid register buffers request startIndex={}, bufferNum={}",
