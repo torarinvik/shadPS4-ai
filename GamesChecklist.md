@@ -52,6 +52,94 @@
 | [ -] | Taxi Chaos | CUSA20527 | Tested, then removed from folder. Blocked by the same fixed `0x4000000000` mapping issue. |
 | [- ] | Severed Steel | CUSA30139 | Tested, then removed from folder. Blocked by the same fixed `0x4000000000` mapping issue. |
 
+## Tested Issue Categories
+
+Games that appear to work fine are intentionally omitted from this triage section.
+
+### Total or Silent Black Screen
+
+| Game | Title ID | State |
+|---|---|---|
+| UFC 2 | CUSA01968 | Boots/runs to timeout, but user observed black screen with no behavior. |
+| Biomutant | CUSA09848 | Boots/runs without short-run crash, but shows plain black screen with no sound or apparent behavior. |
+| Blair Witch | CUSA18142 | Manual run produced black screen with no audio. |
+| Zero Strain | CUSA18570 | Gets past fixed-mapping and directory issues, then reaches black screen with no audio. |
+| Race With Ryan Road Trip Deluxe Edition | CUSA23279 | Gets past fixed-mapping crash and reaches playtime, then black screen with no audio. |
+
+### Render Black, But Game/UI/Audio Is Alive
+
+| Game | Title ID | State |
+|---|---|---|
+| EA Sports UFC | CUSA00264 | Known render black-screen bug; watchdog shows black starts upstream of final presentation. |
+| WORLD OF FINAL FANTASY | CUSA04647 | Gameplay/audio/UI overlays work, but main 3D world rendering is mostly black. |
+| Beast Quest | CUSA09052 | Audio/narrator starts, then reaches UFC-like black-screen bucket with startup flicker. |
+| SEGA Mega Drive Classics | CUSA09771 | Reaches prompt, then black screen while audio/game logic continues. |
+| Borderlands: Game of the Year Edition | CUSA10455 | Responds and flips frames, but starts/continues on black screen. |
+
+### Severe Rendering Corruption or Missing Geometry
+
+| Game | Title ID | State |
+|---|---|---|
+| FINAL FANTASY VII | CUSA01875 | Playable/progresses, but 3D geometry is severely misordered/overlapped with broken scene composition. |
+| Yooka-Laylee | CUSA05721 | Boots into scene/menu path with severe flicker, distortion, and missing geometry. |
+| Crash Bandicoot N. Sane Trilogy | CUSA07399 | Mostly works, but has occasional flicker and broken/missing main character model pieces. |
+| New Super Lucky's Tale | CUSA20302 | UI/subtitles/audio progress, but main scene is mostly solid green with tiny visible fragments. |
+| Gigantosaurus: Dino Sports | CUSA43402 | Playable, but has occasional flicker. |
+
+### Loading, Menu, or Transition Stalls
+
+| Game | Title ID | State |
+|---|---|---|
+| EA Sports UFC 4 | CUSA14204 | Reaches loading-tip screen and playtime advances, but appears stuck during movie/menu transition. |
+| FINAL FANTASY CRYSTAL CHRONICLES Remastered Edition | CUSA16830 | Animated loading screen keeps running for minutes, but never progresses into gameplay. |
+
+### Crashes After Boot or During Loading
+
+| Game | Title ID | State |
+|---|---|---|
+| Tearaway Unfolded | CUSA00562 | Gets into rendering/audio/save activity, then crashes on GPU command processor null read. |
+| Joe's Diner | CUSA03774 | Accepts movement input, then crashes after loading-screen transition in MoltenVK buffer barrier path. |
+| Rise of the Tomb Raider | CUSA05716 | Fixed mapping is relocated, then guest writes near original fixed region and crashes. |
+| OKAMI HD | CUSA08364 | Begins loading/rendering real assets, then crashes on read from `0x38`. |
+| The Outer Worlds | CUSA13689 | Black screen followed by VMM decommit invalid-address crash. |
+| RESIDENT EVIL 3 | CUSA14123 | Fixed-mapping-heavy startup, then crashes with write to `0x0`. |
+| Crysis Remastered | CUSA18671 | Crashes during startup/render initialization after VideoOut registration. |
+| Crysis 2 Remastered | CUSA18672 | Fails remapping relocated render memory, then crashes with write to `0x0`. |
+| Crysis 3 Remastered | CUSA18673 | Crashes during startup/render initialization after large fixed-memory mappings. |
+| Stray | CUSA24899 | UE4 pak index blocker fixed; now crashes later during post-pak asset/runtime loading. |
+| SpongeBob SquarePants: The Cosmic Shake | CUSA30582 | UE4 pak index blocker fixed; now crashes later during post-pak asset/runtime loading. |
+| Redout 2 | CUSA31411 | UE4 pak index blocker fixed; now crashes later during post-pak asset/runtime loading. |
+| The Smurfs 2: The Prisoner of the Green Stone | CUSA43623 | UE4 pak index blocker fixed; now hits post-pak memory/asset-runtime corruption and crashes. |
+
+### GPU Wait or Presenter Stall Risk
+
+| Game | Title ID | State |
+|---|---|---|
+| SHADOW OF THE COLOSSUS | CUSA08809 | Reaches playtime, then hits GPU timeline/presenter wait timeouts; avoid uncapped long runs. |
+
+### Needs Manual Validation
+
+| Game | Title ID | State |
+|---|---|---|
+| DRIVECLUB | CUSA00003 | Survived capped run after fixed-mapping fix; needs visual/gameplay assessment. |
+| Need for Speed Rivals | CUSA00168 | Old mapping crash no longer reproduces; needs manual visual/gameplay validation. |
+| UFC 3 | CUSA06534 | Old image/depth-stencil crashes fixed; needs manual visual/audio assessment. |
+
+### Removed or Not Currently Local, But Previously Tested
+
+| Game | Title ID | State |
+|---|---|---|
+| Another Sight | CUSA15308 | Removed from folder; previously blocked by fixed `0x4000000000` mapping issue. |
+| Minecraft Dungeons | CUSA18797 | Removed from folder; previously blocked by fixed `0x4000000000` mapping issue. |
+| Taxi Chaos | CUSA20527 | Removed from folder; previously blocked by fixed `0x4000000000` mapping issue. |
+| Severed Steel | CUSA30139 | Removed from folder; previously blocked by fixed `0x4000000000` mapping issue. |
+
+### Minor Audio or Gameplay Caveats
+
+| Game | Title ID | State |
+|---|---|---|
+| Teenage Mutant Ninja Turtles: Shredder's Revenge | CUSA30991 | Reaches startup, menu, and gameplay; startup music works, but in-game audio was not yet heard. |
+
 ## List of broken titles on MacOS
 
 Sorted by approximate PS4 storage size, largest to smallest. Sizes are rough and can vary by region, patch, language packs, DLC, and disc vs. digital install.
