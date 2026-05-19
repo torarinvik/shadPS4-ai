@@ -34,25 +34,26 @@ This repository is a work in progress. It contains C++ code derived from
 upstream shadPS4 plus local experiments, diagnostics, compatibility fixes, and
 platform-specific investigations. Some behavior may differ from upstream.
 
-## macOS Compatibility Snapshot
+## Compatibility Snapshot
 
-Current compatibility testing is focused on macOS, especially Apple Silicon Macs
-running the Vulkan renderer through MoltenVK. Unless a row explicitly says
-otherwise, the results below have **not** been validated on Linux or Windows.
+Current compatibility testing is tracked per operating system. So far, the
+manual results below come from macOS, especially Apple Silicon Macs running the
+Vulkan renderer through MoltenVK. Windows and Linux entries are marked
+`Not tested` until we have actual local results for those platforms.
 
 This is not a polished compatibility list yet; it is a living dogfood log. The
 fuller, messier test record lives in [GamesChecklist.md](GamesChecklist.md).
 These are the titles that currently stand out as working or meaningfully
-playable in local macOS testing:
+playable in local testing. Each OS column carries that platform's result notes:
 
-| Game | Title ID | Current macOS result | What changed here |
-|---|---|---|---|
-| The Amazing Spider-Man 2 | CUSA00394 | Reaches the title screen and manual playtesting showed it advances and appears to work fine. | Fixed VideoOut handling for `A16R16G16B16Float` by mapping it to `R16G16B16A16Sfloat` and allowing 64-bpp presentation surfaces. |
-| Tokyo Twilight Ghost Hunters Daybreak: Special Gigs | CUSA06045 | Boots into visual-novel scenes and appeared to work normally in the initial test. | Improved dogfood coverage and documented keyboard/controller mappings needed to advance prompts. |
-| The Witch and the Hundred Knight 2 | CUSA10135 | Appears to work fine during manual play; audio works and the earlier crash was not reproduced. | Hardened NGS2/AT9 audio metadata and waveform decoding/mixing paths that previously crashed during logo/audio loading. |
-| Katamari Damacy Reroll | CUSA24361 | Appears playable in manual testing; strict black-screen watchdog stayed nonblack. | Added safer render/watchdog testing and kept noisy metadata-read diagnostics from being mistaken for a fatal blocker. |
-| Teenage Mutant Ninja Turtles: Shredder's Revenge | CUSA30991 | Reaches startup, main menu, and gameplay; startup music works. | Fixed the flexible-memory/`sceKernelMunmap(0, ...)` quit path that previously made this title much less stable. |
-| Gigantosaurus: Dino Sports | CUSA43402 | Appears playable in manual testing, with occasional flicker. | Render watchdog confirmed it was producing real nonblack frames while Unity-style assets and shaders loaded. |
+| Game | Title ID | macOS | Windows | Linux |
+|---|---|---|---|---|
+| The Amazing Spider-Man 2 | CUSA00394 | Reaches the title screen and manual playtesting showed it advances and appears to work fine. Fork change: Fixed VideoOut handling for `A16R16G16B16Float` by mapping it to `R16G16B16A16Sfloat` and allowing 64-bpp presentation surfaces. | Not tested | Not tested |
+| Tokyo Twilight Ghost Hunters Daybreak: Special Gigs | CUSA06045 | Boots into visual-novel scenes and appeared to work normally in the initial test. Fork change: Improved dogfood coverage and documented keyboard/controller mappings needed to advance prompts. | Not tested | Not tested |
+| The Witch and the Hundred Knight 2 | CUSA10135 | Appears to work fine during manual play; audio works and the earlier crash was not reproduced. Fork change: Hardened NGS2/AT9 audio metadata and waveform decoding/mixing paths that previously crashed during logo/audio loading. | Not tested | Not tested |
+| Katamari Damacy Reroll | CUSA24361 | Appears playable in manual testing; strict black-screen watchdog stayed nonblack. Fork change: Added safer render/watchdog testing and kept noisy metadata-read diagnostics from being mistaken for a fatal blocker. | Not tested | Not tested |
+| Teenage Mutant Ninja Turtles: Shredder's Revenge | CUSA30991 | Reaches startup, main menu, and gameplay; startup music works. Fork change: Fixed the flexible-memory/`sceKernelMunmap(0, ...)` quit path that previously made this title much less stable. | Not tested | Not tested |
+| Gigantosaurus: Dino Sports | CUSA43402 | Appears playable in manual testing, with occasional flicker. Fork change: Render watchdog confirmed it was producing real nonblack frames while Unity-style assets and shaders loaded. | Not tested | Not tested |
 
 Several other titles now boot further than they did before but still have known
 rendering, audio, filesystem, or HLE issues. We track those openly in

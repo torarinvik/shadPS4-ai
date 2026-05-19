@@ -1,9 +1,11 @@
 # shadPS4 fork game compatibility notes
 
-Last updated: 2026-05-15
+Last updated: 2026-05-19
 
-These notes track the local fork test state on macOS using the current checkout and the
-`build/shadps4` binary. They are diagnostic notes, not a general compatibility list.
+These notes track local fork test state per operating system using the current checkout and
+`build/shadps4` binary. Each OS column carries that platform's result notes. The observations
+below currently come from macOS runs; Windows and Linux remain marked as `Not tested` until
+we have actual platform results. These are diagnostic notes, not a general compatibility list.
 
 Use this checkout only:
 
@@ -16,18 +18,18 @@ flicker/distorted/stale graphics in multiple games and in UFC.
 
 ## Tested games
 
-| Game | Title ID | Current state | Notes |
-| --- | --- | --- | --- |
-| Teenage Mutant Ninja Turtles: Shredder's Revenge | CUSA30991 | Playable enough to reach main menu and game | Fixed emulator quit caused by oversized flexible-memory request followed by `sceKernelMunmap(0, ...)`. Startup music works. User observed no in-game audio yet; check game settings and NGS2 audio behavior next. |
-| EA Sports UFC | CUSA00264 | Runs, then hits render black-screen bug | Strict watchdog proves output goes black upstream of final presentation. Next render task is VideoOut compute input stats for shader `0xc455a5aa2c447041`. Brief flicker only when not using the bad GPU-memory-protection override. |
-| Beast Quest | unknown | Starts, audio/narrator plays, then black screen | Also showed flicker/distorted/missing graphics during startup. Similar black-screen bucket to UFC, but not yet diagnosed as deeply. |
-| Yooka-Laylee | CUSA05721 | Boots into scene but input/render issues remain | Severe flicker/distortion/missing geometry seen at startup. Reached a "press X to continue" style screen, but keyboard X did not advance. Resizing by user changed the view but was not itself the root cause. |
-| Joe's Diner | unknown | Starts and accepts movement input | Arrow keys and left stick worked. Keyboard button mappings such as X/C/Z did not behave as expected. Needs input mapping/config follow-up. |
-| Hasbro Family Fun Pack | unknown | Ran after fullscreen quit issue was investigated | Initial quit happened when entering fullscreen; after macOS permission/restart it ran further. Needs retest for current status. |
-| Another Sight | CUSA15308 | Blocked on fixed guest address mapping | Hits fixed map around `0x4000000000`, which overlaps the macOS x86_64-on-Apple-Silicon reserved address hole. Not worth chasing under current Rosetta/native-address setup without address translation or different host. |
-| Minecraft Dungeons | CUSA18797 | Blocked on fixed guest address mapping | Same `0x4000000000` mapping issue as Another Sight. |
-| Taxi Chaos | CUSA20527 | Blocked on fixed guest address mapping | Same `0x4000000000` mapping issue as Another Sight. |
-| Severed Steel | CUSA30139 | Blocked on fixed guest address mapping | Same `0x4000000000` mapping issue as Another Sight. |
+| Game | Title ID | macOS | Windows | Linux |
+| --- | --- | --- | --- | --- |
+| Teenage Mutant Ninja Turtles: Shredder's Revenge | CUSA30991 | Playable enough to reach main menu and game. Fixed emulator quit caused by oversized flexible-memory request followed by `sceKernelMunmap(0, ...)`. Startup music works. User observed no in-game audio yet; check game settings and NGS2 audio behavior next. | Not tested | Not tested |
+| EA Sports UFC | CUSA00264 | Runs, then hits render black-screen bug. Strict watchdog proves output goes black upstream of final presentation. Next render task is VideoOut compute input stats for shader `0xc455a5aa2c447041`. Brief flicker only when not using the bad GPU-memory-protection override. | Not tested | Not tested |
+| Beast Quest | unknown | Starts, audio/narrator plays, then black screen. Also showed flicker/distorted/missing graphics during startup. Similar black-screen bucket to UFC, but not yet diagnosed as deeply. | Not tested | Not tested |
+| Yooka-Laylee | CUSA05721 | Boots into scene but input/render issues remain. Severe flicker/distortion/missing geometry seen at startup. Reached a "press X to continue" style screen, but keyboard X did not advance. Resizing by user changed the view but was not itself the root cause. | Not tested | Not tested |
+| Joe's Diner | unknown | Starts and accepts movement input. Arrow keys and left stick worked. Keyboard button mappings such as X/C/Z did not behave as expected. Needs input mapping/config follow-up. | Not tested | Not tested |
+| Hasbro Family Fun Pack | unknown | Ran after fullscreen quit issue was investigated. Initial quit happened when entering fullscreen; after macOS permission/restart it ran further. Needs retest for current status. | Not tested | Not tested |
+| Another Sight | CUSA15308 | Blocked on fixed guest address mapping. Hits fixed map around `0x4000000000`, which overlaps the macOS x86_64-on-Apple-Silicon reserved address hole. Not worth chasing under current Rosetta/native-address setup without address translation or different host. | Not tested | Not tested |
+| Minecraft Dungeons | CUSA18797 | Blocked on fixed guest address mapping. Same `0x4000000000` mapping issue as Another Sight. | Not tested | Not tested |
+| Taxi Chaos | CUSA20527 | Blocked on fixed guest address mapping. Same `0x4000000000` mapping issue as Another Sight. | Not tested | Not tested |
+| Severed Steel | CUSA30139 | Blocked on fixed guest address mapping. Same `0x4000000000` mapping issue as Another Sight. | Not tested | Not tested |
 
 ## Useful run commands
 
