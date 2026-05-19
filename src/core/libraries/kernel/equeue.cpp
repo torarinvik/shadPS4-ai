@@ -605,10 +605,16 @@ int PS4_SYSV_ABI sceKernelAddUserEventEdge(OrbisKernelEqueue eq, int id) {
 
 void* PS4_SYSV_ABI sceKernelGetEventUserData(const OrbisKernelEvent* ev) {
     ASSERT(ev);
+    if (ev == nullptr) {
+        return nullptr;
+    }
     return ev->udata;
 }
 
 u64 PS4_SYSV_ABI sceKernelGetEventId(const OrbisKernelEvent* ev) {
+    if (ev == nullptr) {
+        return 0;
+    }
     return ev->ident;
 }
 

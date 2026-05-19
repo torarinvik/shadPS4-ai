@@ -441,12 +441,10 @@ int PS4_SYSV_ABI sceRtcGetCurrentClockLocalTime(OrbisRtcDateTime* pTime) {
         // calculate total timezone offset for converting UTC to local time
         uint64_t tzOffset = -(timeZone.tz_minuteswest - (timeZone.tz_dsttime * 60));
 
-        if (returnValue >= 0) {
-            OrbisRtcTick newTick;
-            sceRtcGetCurrentTick(&newTick);
-            sceRtcTickAddMinutes(&newTick, &newTick, tzOffset);
-            sceRtcSetTick(pTime, &newTick);
-        }
+        OrbisRtcTick newTick;
+        sceRtcGetCurrentTick(&newTick);
+        sceRtcTickAddMinutes(&newTick, &newTick, tzOffset);
+        sceRtcSetTick(pTime, &newTick);
     }
 
     return returnValue;
@@ -843,17 +841,16 @@ void PS4_SYSV_ABI sceRtcSetConf(void* p1, void* p2, s32 minuteswest, s32 dsttime
 
 int PS4_SYSV_ABI sceRtcSetCurrentAdNetworkTick(OrbisRtcTick* pTick) {
     LOG_INFO(Lib_Rtc, "called");
+    if (pTick == nullptr) {
+        return Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_AD_NETWORK, nullptr);
+    }
     if (UNIX_EPOCH_TICKS >= pTick->tick) {
         return ORBIS_RTC_ERROR_INVALID_VALUE;
     }
     s32 ret = 0;
-    if (pTick != nullptr) {
-        u64 temp = pTick->tick - UNIX_EPOCH_TICKS;
-        Kernel::OrbisKernelTimespec ts(temp / 1000000, temp % 1000000);
-        ret = Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_AD_NETWORK, &ts);
-    } else {
-        ret = Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_AD_NETWORK, nullptr);
-    }
+    u64 temp = pTick->tick - UNIX_EPOCH_TICKS;
+    Kernel::OrbisKernelTimespec ts(temp / 1000000, temp % 1000000);
+    ret = Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_AD_NETWORK, &ts);
     if (ret < 0) {
         return Kernel::ErrnoToSceKernelError(*Kernel::__Error());
     }
@@ -862,17 +859,16 @@ int PS4_SYSV_ABI sceRtcSetCurrentAdNetworkTick(OrbisRtcTick* pTick) {
 
 int PS4_SYSV_ABI sceRtcSetCurrentDebugNetworkTick(OrbisRtcTick* pTick) {
     LOG_INFO(Lib_Rtc, "called");
+    if (pTick == nullptr) {
+        return Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_DEBUG_NETWORK, nullptr);
+    }
     if (UNIX_EPOCH_TICKS >= pTick->tick) {
         return ORBIS_RTC_ERROR_INVALID_VALUE;
     }
     s32 ret = 0;
-    if (pTick != nullptr) {
-        u64 temp = pTick->tick - UNIX_EPOCH_TICKS;
-        Kernel::OrbisKernelTimespec ts(temp / 1000000, temp % 1000000);
-        ret = Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_DEBUG_NETWORK, &ts);
-    } else {
-        ret = Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_DEBUG_NETWORK, nullptr);
-    }
+    u64 temp = pTick->tick - UNIX_EPOCH_TICKS;
+    Kernel::OrbisKernelTimespec ts(temp / 1000000, temp % 1000000);
+    ret = Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_DEBUG_NETWORK, &ts);
     if (ret < 0) {
         return Kernel::ErrnoToSceKernelError(*Kernel::__Error());
     }
@@ -881,17 +877,16 @@ int PS4_SYSV_ABI sceRtcSetCurrentDebugNetworkTick(OrbisRtcTick* pTick) {
 
 int PS4_SYSV_ABI sceRtcSetCurrentNetworkTick(OrbisRtcTick* pTick) {
     LOG_INFO(Lib_Rtc, "called");
+    if (pTick == nullptr) {
+        return Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_NETWORK, nullptr);
+    }
     if (UNIX_EPOCH_TICKS >= pTick->tick) {
         return ORBIS_RTC_ERROR_INVALID_VALUE;
     }
     s32 ret = 0;
-    if (pTick != nullptr) {
-        u64 temp = pTick->tick - UNIX_EPOCH_TICKS;
-        Kernel::OrbisKernelTimespec ts(temp / 1000000, temp % 1000000);
-        ret = Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_NETWORK, &ts);
-    } else {
-        ret = Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_NETWORK, nullptr);
-    }
+    u64 temp = pTick->tick - UNIX_EPOCH_TICKS;
+    Kernel::OrbisKernelTimespec ts(temp / 1000000, temp % 1000000);
+    ret = Kernel::posix_clock_settime(ORBIS_RTC_CLOCK_ID_NETWORK, &ts);
     if (ret < 0) {
         return Kernel::ErrnoToSceKernelError(*Kernel::__Error());
     }

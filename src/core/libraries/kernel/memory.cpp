@@ -150,12 +150,12 @@ s32 PS4_SYSV_ABI sceKernelVirtualQuery(const void* addr, s32 flags, OrbisVirtual
 }
 
 s32 PS4_SYSV_ABI sceKernelReserveVirtualRange(void** addr, u64 len, s32 flags, u64 alignment) {
-    LOG_INFO(Kernel_Vmm, "addr = {}, len = {:#x}, flags = {:#x}, alignment = {:#x}",
-             fmt::ptr(*addr), len, flags, alignment);
     if (addr == nullptr) {
         LOG_ERROR(Kernel_Vmm, "Address is invalid!");
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
+    LOG_INFO(Kernel_Vmm, "addr = {}, len = {:#x}, flags = {:#x}, alignment = {:#x}",
+             fmt::ptr(*addr), len, flags, alignment);
     if (len == 0 || !Common::Is16KBAligned(len)) {
         LOG_ERROR(Kernel_Vmm, "Map size is either zero or not 16KB aligned!");
         return ORBIS_KERNEL_ERROR_EINVAL;
@@ -676,6 +676,9 @@ s32 PS4_SYSV_ABI sceKernelMemoryPoolGetBlockStats(OrbisKernelMemoryPoolBlockStat
     // As of firmware 12.02, the kernel does not check if stats is null,
     // this can cause crashes on real hardware, so have an assert for this case.
     ASSERT_MSG(stats != nullptr || size == 0, "Block stats cannot be null");
+    if (stats == nullptr) {
+        return size == 0 ? ORBIS_OK : ORBIS_KERNEL_ERROR_EFAULT;
+    }
     std::memcpy(stats, &local_stats, size_to_copy);
     return ORBIS_OK;
 }

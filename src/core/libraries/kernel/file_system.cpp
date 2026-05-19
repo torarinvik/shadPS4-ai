@@ -763,12 +763,12 @@ s64 PS4_SYSV_ABI sceKernelRead(s32 fd, void* buf, u64 nbytes) {
 
 s32 PS4_SYSV_ABI posix_mkdir(const char* path, u16 mode) {
     LOG_INFO(Kernel_Fs, "path = {} mode = {:#o}", path, mode);
-    if (strlen(path) > 255) {
-        *__Error() = POSIX_ENAMETOOLONG;
-        return -1;
-    }
     if (path == nullptr) {
         *__Error() = POSIX_ENOTDIR;
+        return -1;
+    }
+    if (strlen(path) > 255) {
+        *__Error() = POSIX_ENAMETOOLONG;
         return -1;
     }
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
@@ -1553,12 +1553,12 @@ s64 PS4_SYSV_ABI sceKernelPwritev(s32 fd, const OrbisKernelIovec* iov, s32 iovcn
 }
 
 s32 PS4_SYSV_ABI posix_unlink(const char* path) {
-    if (strlen(path) > 255) {
-        *__Error() = POSIX_ENAMETOOLONG;
-        return -1;
-    }
     if (path == nullptr) {
         *__Error() = POSIX_EINVAL;
+        return -1;
+    }
+    if (strlen(path) > 255) {
+        *__Error() = POSIX_ENAMETOOLONG;
         return -1;
     }
 
@@ -1858,7 +1858,8 @@ s32 PS4_SYSV_ABI posix_select(s32 nfds, fd_set* readfds, fd_set* writefds, fd_se
         return 0;
     }
 
-    s32 ret = select(max_fd + 1, &read_host, &write_host, &except_host, (timeval*)timeout);
+    s32 ret =
+        select(max_fd + 1, &read_host, &write_host, &except_host, reinterpret_cast<timeval*>(timeout));
 
     if (ret > 0) {
         if (readfds) {

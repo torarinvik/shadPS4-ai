@@ -3,6 +3,7 @@
 
 #include <condition_variable>
 #include <list>
+#include <memory>
 #include <mutex>
 #include <semaphore>
 
@@ -50,11 +51,11 @@ public:
         }
 
         // Create waiting thread object and add it into the list of waiters.
-        WaitingThread waiter{need_count, is_fifo};
-        const auto it = AddWaiter(&waiter);
+        auto waiter = std::make_shared<WaitingThread>(need_count, is_fifo);
+        const auto it = AddWaiter(waiter);
 
         // Perform the wait.
-        const s32 result = waiter.Wait(lk, timeout);
+        const s32 result = waiter->Wait(lk, timeout);
         if (result == ORBIS_KERNEL_ERROR_ETIMEDOUT) {
             wait_list.erase(it);
         }
@@ -70,7 +71,7 @@ public:
 
         // Wake up threads in order of priority.
         for (auto it = wait_list.begin(); it != wait_list.end();) {
-            auto* waiter = *it;
+            auto& waiter = *it;
             if (waiter->need_count > token_count) {
                 ++it;
                 continue;
@@ -89,7 +90,7 @@ public:
         if (num_waiters) {
             *num_waiters = static_cast<s32>(wait_list.size());
         }
-        for (auto* waiter : wait_list) {
+        for (auto& waiter : wait_list) {
             waiter->was_canceled = true;
             waiter->sem.release();
         }
@@ -100,7 +101,7 @@ public:
 
     void Delete() {
         std::scoped_lock lk{mutex};
-        for (auto* waiter : wait_list) {
+        for (auto& waiter : wait_list) {
             waiter->was_deleted = true;
             waiter->sem.release();
         }
@@ -164,12 +165,12 @@ public:
         }
     };
 
-    using WaitList = std::list<WaitingThread*>;
+    using WaitList = std::list<std::shared_ptr<WaitingThread>>;
 
-    WaitList::iterator AddWaiter(WaitingThread* waiter) {
+    WaitList::iterator AddWaiter(std::shared_ptr<WaitingThread> waiter) {
         // Insert at the end of the list for FIFO order.
         if (is_fifo) {
-            wait_list.push_back(waiter);
+            wait_list.push_back(std::move(waiter));
             return --wait_list.end();
         }
         // Find the first with lower priority (greater number) than us and insert right before it.
@@ -177,7 +178,7 @@ public:
         while (it != wait_list.end() && (*it)->priority <= waiter->priority) {
             ++it;
         }
-        return wait_list.insert(it, waiter);
+        return wait_list.insert(it, std::move(waiter));
     }
 
     WaitList wait_list;

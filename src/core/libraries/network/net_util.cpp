@@ -210,7 +210,7 @@ bool NetUtilInternal::RetrieveDefaultGateway() {
         if (rtmAddrs & 1) {
             sa = reinterpret_cast<sockaddr*>(spacePtr);
             if (index == RTA_GATEWAY) {
-                gateAddr = &((sockaddr_in*)sa)->sin_addr;
+                gateAddr = &reinterpret_cast<sockaddr_in*>(sa)->sin_addr;
                 break;
             }
             spacePtr += sa->sa_len > 0 ? roundUpClosestMultiple(sizeof(uint32_t), sa->sa_len)
@@ -391,9 +391,13 @@ int NetUtilInternal::ResolveHostname(const char* hostname, Libraries::Net::Orbis
         ret = ORBIS_NET_ERETURN;
     } else {
         ASSERT(info && info->ai_addr);
-        in_addr resolved_addr = ((sockaddr_in*)info->ai_addr)->sin_addr;
-        LOG_DEBUG(Lib_Net, "resolved address for {}: {}", hostname, inet_ntoa(resolved_addr));
-        addr->inaddr_addr = resolved_addr.s_addr;
+        if (info == nullptr || info->ai_addr == nullptr) {
+            ret = ORBIS_NET_ERETURN;
+        } else {
+            in_addr resolved_addr = reinterpret_cast<sockaddr_in*>(info->ai_addr)->sin_addr;
+            LOG_DEBUG(Lib_Net, "resolved address for {}: {}", hostname, inet_ntoa(resolved_addr));
+            addr->inaddr_addr = resolved_addr.s_addr;
+        }
     }
 
     freeaddrinfo(info);

@@ -276,8 +276,18 @@ protected:
 class UsbEmulatedBackend : public UsbRealBackend {
 public:
     s64 GetDeviceList(libusb_device*** list) override {
+        if (!list) {
+            return LIBUSB_ERROR_INVALID_PARAM;
+        }
         auto** fake = static_cast<libusb_device**>(calloc(2, sizeof(libusb_device*)));
+        if (!fake) {
+            return LIBUSB_ERROR_NO_MEM;
+        }
         fake[0] = GetDevice(nullptr);
+        if (!fake[0]) {
+            free(fake);
+            return LIBUSB_ERROR_NO_MEM;
+        }
         fake[1] = nullptr;
         *list = fake;
 
@@ -300,25 +310,43 @@ public:
     }
 
     s32 GetConfiguration(libusb_device_handle* dev, s32* config) override {
-        config = nullptr;
+        if (!config) {
+            return LIBUSB_ERROR_INVALID_PARAM;
+        }
+        *config = 0;
         return LIBUSB_SUCCESS;
     }
 
     s32 GetDeviceDescriptor(libusb_device* dev, libusb_device_descriptor* desc) override {
-        std::memcpy(desc, FillDeviceDescriptor(), sizeof(libusb_device_descriptor));
+        const auto device_desc = FillDeviceDescriptor();
+        if (!desc || !device_desc) {
+            return LIBUSB_ERROR_INVALID_PARAM;
+        }
+        std::memcpy(desc, device_desc, sizeof(libusb_device_descriptor));
         return LIBUSB_SUCCESS;
     }
     s32 GetActiveConfigDescriptor(libusb_device* dev, libusb_config_descriptor** config) override {
+        if (!config) {
+            return LIBUSB_ERROR_INVALID_PARAM;
+        }
         const auto endpoint_descs = FillEndpointDescriptorPair();
         const auto interface_desc = FillInterfaceDescriptor(endpoint_descs);
+        if (!endpoint_descs || !interface_desc) {
+            return LIBUSB_ERROR_NO_MEM;
+        }
 
         const auto interface = static_cast<libusb_interface*>(calloc(1, sizeof(libusb_interface)));
+        if (!interface) {
+            return LIBUSB_ERROR_NO_MEM;
+        }
         interface->altsetting = interface_desc;
         interface->num_altsetting = 1;
 
         const auto new_config = FillConfigDescriptor(interface);
-
-        ASSERT(endpoint_descs && interface_desc && new_config);
+        if (!new_config) {
+            free(interface);
+            return LIBUSB_ERROR_NO_MEM;
+        }
         *config = new_config;
         return LIBUSB_SUCCESS;
     }
@@ -340,17 +368,20 @@ public:
         return 0;
     }
     s32 GetMaxPacketSize(libusb_device* dev, u8 endpoint) override {
-        libusb_device_descriptor* desc = nullptr;
+        libusb_device_descriptor desc{};
 
-        int r = GetDeviceDescriptor(dev, desc);
+        int r = GetDeviceDescriptor(dev, &desc);
         if (r < LIBUSB_SUCCESS) {
             return LIBUSB_ERROR_OTHER;
         }
-        return desc->bMaxPacketSize0;
+        return desc.bMaxPacketSize0;
     }
 
     s32 OpenDevice(libusb_device* dev, libusb_device_handle** dev_handle) override {
-        auto* _dev_handle = static_cast<UsbDeviceHandle*>(calloc(1, sizeof(libusb_device_handle*)));
+        if (!dev_handle) {
+            return LIBUSB_ERROR_INVALID_PARAM;
+        }
+        auto* _dev_handle = static_cast<UsbDeviceHandle*>(calloc(1, sizeof(UsbDeviceHandle)));
         if (!_dev_handle) {
             return LIBUSB_ERROR_NO_MEM;
         }
@@ -365,8 +396,14 @@ public:
     libusb_device* GetDevice(libusb_device_handle* dev_handle) override {
         const auto desc = FillDeviceDescriptor();
         ASSERT(desc);
+        if (!desc) {
+            return nullptr;
+        }
 
         const auto fake = static_cast<UsbDevice*>(calloc(1, sizeof(UsbDevice)));
+        if (!fake) {
+            return nullptr;
+        }
         fake->bus_number = 0;
         fake->port_number = 0;
         fake->device_address = 0;

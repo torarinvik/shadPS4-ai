@@ -21,6 +21,9 @@ Core::Tcb* TcbCtor(Pthread* thread, int initial) {
     auto* linker = Common::Singleton<Core::Linker>::Instance();
     auto* addr_out = linker->AllocateTlsForThread(initial);
     ASSERT_MSG(addr_out, "Unable to allocate guest TCB");
+    if (addr_out == nullptr) {
+        return nullptr;
+    }
 
     // Initialize allocated memory and allocate DTV table.
     const u32 num_dtvs = linker->MaxTlsIndex();
@@ -68,11 +71,12 @@ void TcbDtor(Core::Tcb* oldtls) {
     ASSERT_MSG(num_dtvs <= max_tls_index, "Out of bounds DTV access");
 
     const u32 static_tls_size = linker->StaticTlsSize();
-    const u8* tls_base = (const u8*)oldtls - static_tls_size;
+    const auto* oldtls_addr = reinterpret_cast<const u8*>(oldtls);
+    const u8* tls_base = oldtls_addr - static_tls_size;
 
     for (int i = 1; i < num_dtvs; i++) {
         u8* dtv_ptr = dtv_table[i + 1].pointer;
-        if (dtv_ptr && (dtv_ptr < tls_base || (const u8*)oldtls < dtv_ptr)) {
+        if (dtv_ptr && (dtv_ptr < tls_base || oldtls_addr < dtv_ptr)) {
             linker->FreeTlsForNonPrimaryThread(dtv_ptr);
         }
     }
