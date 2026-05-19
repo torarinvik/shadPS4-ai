@@ -332,6 +332,16 @@ s32 PS4_SYSV_ABI elf_phdr_match_addr(void* info, void* addr) {
     return 0;
 }
 
+u64 PS4_SYSV_ABI sceKernelPrintBacktraceWithModuleInfo(u64, u64, u64, u64, u64, u64) {
+    LOG_DEBUG(Lib_Kernel, "(STUBBED)");
+    return 0;
+}
+
+s32 PS4_SYSV_ABI is_signal_return(u64, u64, u64, u64, u64, u64) {
+    LOG_DEBUG(Lib_Kernel, "(STUBBED)");
+    return 0;
+}
+
 void PS4_SYSV_ABI pthread_cxa_finalize(void* dso_handle) {
     LOG_TRACE(Lib_Kernel, "__pthread_cxa_finalize({}) ignored", fmt::ptr(dso_handle));
 }
@@ -375,6 +385,9 @@ void RegisterProcess(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("DFmMT80xcNI", "libkernel", 1, "libkernel", posix_sysctl);
     LIB_FUNCTION("mo0bFmWppIw", "libkernel", 1, "libkernel", posix_sigreturn);
     LIB_FUNCTION("Fjc4-n1+y2g", "libkernel", 1, "libkernel", elf_phdr_match_addr);
+    LIB_FUNCTION("Wl2o5hOVZdw", "libkernel", 1, "libkernel",
+                 sceKernelPrintBacktraceWithModuleInfo);
+    LIB_FUNCTION("crb5j7mkk1c", "libkernel", 1, "libkernel", is_signal_return);
     LIB_FUNCTION("kbw4UHHSYy0", "libkernel", 1, "libkernel", pthread_cxa_finalize);
     LIB_FUNCTION("OAmWq+OHSjw", "libkernel", 1, "libkernel", scePthreadSetcancelstate);
     LIB_FUNCTION("6Z83sYWFlA8", "libkernel", 1, "libkernel", exit);

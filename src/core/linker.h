@@ -113,13 +113,12 @@ public:
         std::scoped_lock lk{mutex};
 
         Relocate(m);
-        const auto exports = m->GetExportModules();
-        for (auto& export_mod : exports) {
-            for (auto& module : m_modules) {
-                const auto imports = module->GetImportModules();
-                if (std::ranges::contains(imports, export_mod.name, &ModuleInfo::name)) {
-                    Relocate(module.get());
-                }
+        // Dynamic PRX loading can satisfy imports that were previously stubbed. Retry every
+        // module's unresolved relocations instead of relying on exact import/export metadata names:
+        // some titles use private PRX metadata whose names/ids do not compare cleanly here.
+        for (auto& module : m_modules) {
+            if (module.get() != m) {
+                Relocate(module.get());
             }
         }
     }

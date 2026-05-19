@@ -12,6 +12,7 @@
 #include "common/thread.h"
 #include "common/va_ctx.h"
 #include "core/file_sys/fs.h"
+#include "core/linker.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/coredump/coredump.h"
 #include "core/libraries/kernel/debug.h"
@@ -158,9 +159,62 @@ struct HeapInfoInfo {
     u64* mstate_table;
 };
 
+s32 PS4_SYSV_ABI sceKernelInternalMemoryGetModuleSegmentInfo(VAddr address_or_handle,
+                                                            u64 segment_index_or_info,
+                                                            Core::OrbisKernelModuleSegmentInfo* info) {
+    auto* linker = Common::Singleton<Core::Linker>::Instance();
+
+    Core::Module* module = nullptr;
+    u64 segment_index = 0;
+
+    if (segment_index_or_info < Core::SCE_DBG_MAX_SEGMENTS && info != nullptr) {
+        // Some callers use a handle/index/output shape.
+        segment_index = segment_index_or_info;
+        module = linker->GetModule(static_cast<s32>(address_or_handle));
+        if (module == nullptr) {
+            module = linker->FindByAddress(address_or_handle);
+        }
+    } else {
+        // Heap trace callbacks commonly ask for the segment containing an address.
+        info = reinterpret_cast<Core::OrbisKernelModuleSegmentInfo*>(segment_index_or_info);
+        module = linker->FindByAddress(address_or_handle);
+    }
+
+    if (info == nullptr) {
+        return ORBIS_KERNEL_ERROR_EFAULT;
+    }
+    if (module == nullptr) {
+        return ORBIS_KERNEL_ERROR_ESRCH;
+    }
+
+    const auto module_info = module->GetModuleInfo();
+    if (segment_index_or_info >= Core::SCE_DBG_MAX_SEGMENTS && segment_index_or_info != 0) {
+        for (u32 i = 0; i < module_info.num_segments; i++) {
+            const auto& segment = module_info.segments[i];
+            if (address_or_handle >= segment.address &&
+                address_or_handle - segment.address < segment.size) {
+                *info = segment;
+                return ORBIS_OK;
+            }
+        }
+        return ORBIS_KERNEL_ERROR_ESRCH;
+    }
+
+    if (segment_index >= module_info.num_segments) {
+        return ORBIS_KERNEL_ERROR_EINVAL;
+    }
+    *info = module_info.segments[segment_index];
+    return ORBIS_OK;
+}
+
 void PS4_SYSV_ABI sceLibcHeapGetTraceInfo(HeapInfoInfo* info) {
+    if (info == nullptr) {
+        return;
+    }
     info->mspace_atomic_id_mask = &g_mspace_atomic_id_mask;
     info->mstate_table = g_mstate_table;
+    // This field is a 32-bit libc-internal token in the observed ABI, not a raw 64-bit host
+    // function pointer. Keep it zero until we model the exact callback trampoline contract.
     info->getSegmentInfo = 0;
 }
 
@@ -487,6 +541,8 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
 
     LIB_FUNCTION("NWtTN10cJzE", "libSceLibcInternalExt", 1, "libSceLibcInternal",
                  sceLibcHeapGetTraceInfo);
+    LIB_FUNCTION("-YTW+qXc3CQ", "libkernel", 1, "libkernel",
+                 sceKernelInternalMemoryGetModuleSegmentInfo);
 
     // network
     LIB_FUNCTION("XVL8So3QJUk", "libkernel", 1, "libkernel", Libraries::Net::sys_connect);

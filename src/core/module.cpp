@@ -128,6 +128,10 @@ s32 Module::Start(u64 args, const void* argp, void* param) {
     if (dynamic_info.init_virtual_addr != 0) {
         const VAddr addr = dynamic_info.init_virtual_addr + GetBaseAddress();
         ret = reinterpret_cast<EntryFunc>(addr)(args, argp, param);
+    } else if (IsSharedLib() && !IsSystemLib()) {
+        const VAddr addr = GetEntryAddress();
+        LOG_INFO(Core_Linker, "{} using ELF entry fallback for module_start at {:#x}", name, addr);
+        ret = reinterpret_cast<EntryFunc>(addr)(args, argp, param);
     }
 
     call_init_array("DT_INIT_ARRAY", dynamic_info.init_array_virtual_addr,
@@ -486,7 +490,9 @@ void Module::LoadSymbols() {
             const auto* module = FindModule(ids[2]);
             ASSERT_MSG(library && module, "Unable to find library and module");
             if ((bind != STB_GLOBAL && bind != STB_WEAK) ||
-                (type != STT_FUN && type != STT_OBJECT) || export_func != (sym->st_value != 0)) {
+                (type != STT_FUN && type != STT_OBJECT && type != STT_NOTYPE &&
+                 type != STT_SCE) ||
+                export_func != (sym->st_value != 0)) {
                 continue;
             }
 

@@ -27,6 +27,14 @@ const SymbolRecord* SymbolsResolver::FindSymbol(const SymbolResolver& s) const {
         }
     }
 
+    const std::string prefix =
+        fmt::format("{}#{}#{}#{}#", s.name, s.library, s.library_version, s.module);
+    for (u32 i = 0; i < m_symbols.size(); i++) {
+        if (m_symbols[i].name.starts_with(prefix)) {
+            return &m_symbols[i];
+        }
+    }
+
     // LOG_INFO(Core_Linker, "Unresolved! {}", name);
     return nullptr;
 }
