@@ -328,6 +328,11 @@ void GameControllers::TryOpenSDLControllers() {
         is_first_check = false;
         if (controller_count - move_count == 0) {
             auto u = UserManagement.GetUserByPlayerIndex(1);
+            if (!u) {
+                LOG_WARNING(Input, "Cannot assign default controller: user 1 not found");
+                SDL_free(new_joysticks);
+                return;
+            }
             controllers[0]->user_id = u->user_id;
             UserManagement.LoginUser(u, 1);
         }

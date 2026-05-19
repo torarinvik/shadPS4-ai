@@ -431,3 +431,5 @@ result
 /build-codex-make
 /codeql-db
 cppcheck-report.txt
+codeql-results.csv
+clang-tidy-report.txt

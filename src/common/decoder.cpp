@@ -23,10 +23,11 @@ std::string DecoderImpl::disassembleInst(ZydisDecodedInstruction& inst,
 }
 
 void DecoderImpl::printInstruction(void* code, u64 address) {
+    static constexpr u64 MaxInstructionBytes = 15;
     ZydisDecodedInstruction instruction;
     ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT_VISIBLE];
     ZyanStatus status =
-        ZydisDecoderDecodeFull(&m_decoder, code, sizeof(code), &instruction, operands);
+        ZydisDecoderDecodeFull(&m_decoder, code, MaxInstructionBytes, &instruction, operands);
     if (!ZYAN_SUCCESS(status)) {
         fmt::print("decode instruction failed at {}\n", fmt::ptr(code));
     } else {

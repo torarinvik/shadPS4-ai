@@ -175,9 +175,18 @@ bool NetUtilInternal::RetrieveDefaultGateway() {
     };
 
     struct BSDRoutingMessage routingMessage;
+    struct RouteSocket {
+        int fd{-1};
+        ~RouteSocket() {
+            if (fd >= 0) {
+                close(fd);
+            }
+        }
+    };
+
     // It creates a raw socket that can be used for routing-related operations
-    int sockfd = socket(PF_ROUTE, SOCK_RAW, 0);
-    if (sockfd < 0) {
+    RouteSocket route_socket{socket(PF_ROUTE, SOCK_RAW, 0)};
+    if (route_socket.fd < 0) {
         return false;
     }
     memset(reinterpret_cast<char*>(&routingMessage), 0, sizeof(routingMessage));
@@ -188,33 +197,49 @@ bool NetUtilInternal::RetrieveDefaultGateway() {
     routingMessage.header.rtm_flags = RTF_UP | RTF_GATEWAY | RTF_STATIC;
     routingMessage.header.rtm_msglen += 2 * sizeof(sockaddr_in);
 
-    if (write(sockfd, reinterpret_cast<char*>(&routingMessage), routingMessage.header.rtm_msglen) <
-        0) {
+    if (write(route_socket.fd, reinterpret_cast<char*>(&routingMessage),
+              routingMessage.header.rtm_msglen) < 0) {
         return false;
     }
 
     // Read the response from the route socket
-    if (read(sockfd, reinterpret_cast<char*>(&routingMessage), sizeof(routingMessage)) < 0) {
+    const auto bytes_read =
+        read(route_socket.fd, reinterpret_cast<char*>(&routingMessage), sizeof(routingMessage));
+    if (bytes_read < static_cast<ssize_t>(sizeof(rt_msghdr))) {
         return false;
     }
 
     struct in_addr* gateAddr = nullptr;
-    struct sockaddr* sa = nullptr;
-    char* spacePtr = (reinterpret_cast<char*>(&routingMessage.header + 1));
+    const char* const message_begin = reinterpret_cast<char*>(&routingMessage);
+    const char* const message_end = message_begin + bytes_read;
+    char* spacePtr = reinterpret_cast<char*>(&routingMessage.header + 1);
     auto rtmAddrs = routingMessage.header.rtm_addrs;
     int index = 1;
-    auto roundUpClosestMultiple = [](int multiple, int num) {
+    auto roundUpClosestMultiple = [](size_t multiple, size_t num) {
         return ((num + multiple - 1) / multiple) * multiple;
     };
     while (rtmAddrs) {
         if (rtmAddrs & 1) {
-            sa = reinterpret_cast<sockaddr*>(spacePtr);
+            if (spacePtr + sizeof(sockaddr) > message_end) {
+                return false;
+            }
+
+            auto* sa = reinterpret_cast<sockaddr*>(spacePtr);
+            const size_t socket_addr_len =
+                sa->sa_len > 0 ? roundUpClosestMultiple(sizeof(uint32_t), sa->sa_len)
+                               : sizeof(uint32_t);
+            if (spacePtr + socket_addr_len > message_end) {
+                return false;
+            }
+
             if (index == RTA_GATEWAY) {
+                if (sa->sa_family != AF_INET || socket_addr_len < sizeof(sockaddr_in)) {
+                    return false;
+                }
                 gateAddr = &reinterpret_cast<sockaddr_in*>(sa)->sin_addr;
                 break;
             }
-            spacePtr += sa->sa_len > 0 ? roundUpClosestMultiple(sizeof(uint32_t), sa->sa_len)
-                                       : sizeof(uint32_t);
+            spacePtr += socket_addr_len;
         }
         index++;
         rtmAddrs >>= 1;

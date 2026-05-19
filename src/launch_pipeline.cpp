@@ -210,6 +210,9 @@ int RunParsedLaunch(const char* executable_name, LaunchIntent::CliState state) {
     if (!NormalizeGamePathAndArgs(state.game_path, state.game_args)) {
         return 1;
     }
+    if (!state.game_path) {
+        return 1;
+    }
 
     if (!ApplyLaunchFlags(state.patch_file, state.ignore_game_patch, state.fullscreen,
                           state.show_fps, state.config_clean, state.config_global)) {

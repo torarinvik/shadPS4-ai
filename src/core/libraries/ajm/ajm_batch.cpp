@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/alignment.h"
+#include "common/logging/log.h"
 #include "core/libraries/ajm/ajm_batch.h"
 
 namespace Libraries::Ajm {
@@ -162,8 +163,11 @@ AjmJob AjmStatisticsJobFromBatchBuffer(u32 instance_id, AjmBatchBuffer batch_buf
         }
     }
 
-    ASSERT(job_flags.has_value());
-    job.flags = job_flags.value();
+    if (!job_flags.has_value()) {
+        LOG_ERROR(Lib_Ajm, "Malformed AJM statistics job: missing flags chunk");
+        return job;
+    }
+    job.flags = *job_flags;
 
     AjmStatisticsJobFlags flags{.raw = job.flags.raw};
     if (input_control_buffer.has_value()) {
@@ -261,13 +265,16 @@ AjmJob AjmJobFromBatchBuffer(u32 instance_id, AjmBatchBuffer batch_buffer) {
         }
     }
 
-    ASSERT(job_flags.has_value());
-    job.flags = job_flags.value();
+    if (!job_flags.has_value()) {
+        LOG_ERROR(Lib_Ajm, "Malformed AJM job: missing flags chunk");
+        return job;
+    }
+    job.flags = *job_flags;
 
     // Initialize sideband input parameters
     if (input_control_buffer.has_value()) {
         AjmBatchBuffer input_batch(input_control_buffer.value());
-        const auto sideband_flags = job_flags->sideband_flags;
+        const auto sideband_flags = job.flags.sideband_flags;
         if (True(sideband_flags & AjmJobSidebandFlags::Format) && !input_batch.IsEmpty()) {
             job.input.format = input_batch.Consume<AjmSidebandFormat>();
         }
@@ -275,7 +282,7 @@ AjmJob AjmJobFromBatchBuffer(u32 instance_id, AjmBatchBuffer batch_buffer) {
             job.input.gapless_decode = input_batch.Consume<AjmSidebandGaplessDecode>();
         }
 
-        const auto control_flags = job_flags.value().control_flags;
+        const auto control_flags = job.flags.control_flags;
         if (True(control_flags & AjmJobControlFlags::Resample)) {
             job.input.resample_parameters = input_batch.Consume<AjmSidebandResampleParameters>();
         }
@@ -290,7 +297,7 @@ AjmJob AjmJobFromBatchBuffer(u32 instance_id, AjmBatchBuffer batch_buffer) {
         job.output.p_result = &output_batch.Consume<AjmSidebandResult>();
         *job.output.p_result = AjmSidebandResult{};
 
-        const auto sideband_flags = job_flags->sideband_flags;
+        const auto sideband_flags = job.flags.sideband_flags;
         if (True(sideband_flags & AjmJobSidebandFlags::Stream) && !output_batch.IsEmpty()) {
             job.output.p_stream = &output_batch.Consume<AjmSidebandStream>();
             *job.output.p_stream = AjmSidebandStream{};
@@ -304,7 +311,7 @@ AjmJob AjmJobFromBatchBuffer(u32 instance_id, AjmBatchBuffer batch_buffer) {
             *job.output.p_gapless_decode = AjmSidebandGaplessDecode{};
         }
 
-        const auto run_flags = job_flags->run_flags;
+        const auto run_flags = job.flags.run_flags;
         if (True(run_flags & AjmJobRunFlags::MultipleFrames) && !output_batch.IsEmpty()) {
             job.output.p_mframe = &output_batch.Consume<AjmSidebandMFrame>();
             *job.output.p_mframe = AjmSidebandMFrame{};

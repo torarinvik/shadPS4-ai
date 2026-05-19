@@ -31,6 +31,9 @@ extern "C" void PS4_SYSV_ABI _sceFiberForceQuit(u64 ret) asm("_sceFiberForceQuit
 
 extern "C" void PS4_SYSV_ABI _sceFiberForceQuit(u64 ret) {
     OrbisFiberContext* g_ctx = GetFiberContext();
+    if (!g_ctx) {
+        UNREACHABLE_MSG("sceFiberForceQuit called without an active fiber context");
+    }
     g_ctx->return_val = ret;
     _sceFiberLongJmp(g_ctx);
 }
@@ -433,6 +436,7 @@ s32 PS4_SYSV_ABI sceFiberReturnToThread(u64 arg_on_return, u64* arg_on_run) {
 
     _sceFiberTerminate(cur_fiber, arg_on_return, g_ctx);
     __builtin_trap();
+    return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceFiberGetInfo(OrbisFiber* fiber, OrbisFiberInfo* fiber_info) {

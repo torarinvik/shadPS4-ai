@@ -212,21 +212,22 @@ Sorted by approximate PS4 storage size, largest to smallest. Sizes are rough and
 | [ ] | 25 | RESIDENT EVIL 7 biohazard |
 | [x] | 25 | Need for Speed™ |
 | [ ] | 23 | LEFT ALIVE |
-| [ ] | 22 | Sniper Elite 4 |
-| [ ] | 21 | Tokyo 42 |
-| [ ] | 20 | SWORD ART ONLINE Alicization Lycoris |
-| [ ] | 18 | Chicken Police |
-| [ ] | 16 | ASTRO BOT Rescue Mission |
-| [ ] | 15 | Moss |
+| [ ] | 30.1 | Sniper Elite 4 |
+| [X ] | 683 mb | Tokyo 42 |
+| [ X] | 41.2 | SWORD ART ONLINE Alicization Lycoris |
+| [ Unavailable] | 18 | Chicken Police |
+| [ Unavailable] | 16 | ASTRO BOT Rescue Mission |
+| [ Unavailable] | 15 | Moss |
 | [x] | 13 | Tony Hawk's™ Pro Skater™ 3 + 4 |
-| [ ] | 13 | Tony Hawk's™ Pro Skater™ 1 + 2 |
-| [ ] | 12 | FINAL FANTASY XII THE ZODIAC AGE |
-| [ ] | 12 | Project Highrise: Architect's Edition |
+| [ Unavailable] | 23.78 | Tony Hawk's™ Pro Skater™ 1 + 2 |
+| [X ] | 12 | FINAL FANTASY XII THE ZODIAC AGE |
+| [ Unavailable] | 12 | Project Highrise: Architect's Edition |
+| [X] | 220 mb | Prison architect |
 | [x] | 12 | Resident Evil 4 |
 | [x] | 11 | The Witch and the Hundred Knight: Revival Edition |
 | [x] | ? | Final Fantasy X/X-2 HD Remaster |
-| [ ] | ? | Overwatch: Origins Edition |
+| [ Unavailable] | ? | Overwatch: Origins Edition |
 | [x] | 6 | Galak-Z |
-| [ ] | 37.2 | KNACK 2 |
-| [ ] | 36.5 | Fallout 4 |
-| [ ] | ? | HORROR TALES: The Wine |
+| [ X] | 37.2 | KNACK 2 |
+| [ Unavailable] | 36.5 | Fallout 4 |
+| [ Unavailable] | ? | HORROR TALES: The Wine |

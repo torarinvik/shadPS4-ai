@@ -480,7 +480,7 @@ void PS4_SYSV_ABI internal__Fofree(OrbisFILE* file) {
         // Remove file from vector
         g_files.erase(file->_Idx);
         internal__Mtxdst(&file->_Mutex);
-        free(file);
+        delete file;
     }
 }
 

@@ -219,6 +219,11 @@ s32 Linker::LoadAndStartModule(const std::filesystem::path& path, u64 args, cons
         return -1;
     }
     auto* module = GetModule(handle);
+    if (!module) {
+        LOG_ERROR(Core_Linker, "Loaded module handle {} for '{}' did not resolve to a module", handle,
+                  path.string());
+        return -1;
+    }
     RelocateAnyImports(module);
 
     // If the new module has a TLS image, trigger its load when TlsGetAddr is called.
