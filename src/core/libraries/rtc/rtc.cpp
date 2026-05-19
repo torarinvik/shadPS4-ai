@@ -112,18 +112,27 @@ int PS4_SYSV_ABI sceRtcFormatRFC2822(char* pszDateTime, const OrbisRtcTick* pTic
     if (pszDateTime == nullptr)
         return ORBIS_RTC_ERROR_INVALID_POINTER;
 
-    OrbisRtcTick formatTick;
+    OrbisRtcTick formatTick{};
 
     if (pTickUtc == nullptr) {
-        sceRtcGetCurrentTick(&formatTick);
+        const int tickResult = sceRtcGetCurrentTick(&formatTick);
+        if (tickResult != ORBIS_OK) {
+            return tickResult;
+        }
     } else {
         formatTick.tick = pTickUtc->tick;
     }
 
-    sceRtcTickAddMinutes(&formatTick, &formatTick, iTimeZoneMinutes);
+    const int addResult = sceRtcTickAddMinutes(&formatTick, &formatTick, iTimeZoneMinutes);
+    if (addResult != ORBIS_OK) {
+        return addResult;
+    }
 
-    OrbisRtcDateTime formatTime;
-    sceRtcSetTick(&formatTime, &formatTick);
+    OrbisRtcDateTime formatTime{};
+    const int setResult = sceRtcSetTick(&formatTime, &formatTick);
+    if (setResult != ORBIS_OK) {
+        return setResult;
+    }
 
     int validTime = sceRtcCheckValid(&formatTime);
 
@@ -289,19 +298,28 @@ int PS4_SYSV_ABI sceRtcFormatRFC3339Precise(char* pszDateTime, const OrbisRtcTic
     if (pszDateTime == nullptr)
         return ORBIS_RTC_ERROR_INVALID_POINTER;
 
-    OrbisRtcTick formatTick;
+    OrbisRtcTick formatTick{};
 
     if (pTickUtc == nullptr) {
-        sceRtcGetCurrentTick(&formatTick);
+        const int tickResult = sceRtcGetCurrentTick(&formatTick);
+        if (tickResult != ORBIS_OK) {
+            return tickResult;
+        }
     } else {
         formatTick.tick = pTickUtc->tick;
     }
 
-    sceRtcTickAddMinutes(&formatTick, &formatTick, iTimeZoneMinutes);
+    const int addResult = sceRtcTickAddMinutes(&formatTick, &formatTick, iTimeZoneMinutes);
+    if (addResult != ORBIS_OK) {
+        return addResult;
+    }
 
-    OrbisRtcDateTime formatTime;
+    OrbisRtcDateTime formatTime{};
 
-    sceRtcSetTick(&formatTime, &formatTick);
+    const int setResult = sceRtcSetTick(&formatTime, &formatTick);
+    if (setResult != ORBIS_OK) {
+        return setResult;
+    }
 
     std::string formattedString;
     formattedString = std::to_string(formatTime.year) + "-";
@@ -416,11 +434,13 @@ int PS4_SYSV_ABI sceRtcGetCurrentClock(OrbisRtcDateTime* pTime, int timeZone) {
     int returnValue = Kernel::sceKernelClockGettime(Kernel::ORBIS_CLOCK_REALTIME, &clocktime);
 
     if (returnValue == ORBIS_OK) {
-        OrbisRtcTick clockTick;
+        OrbisRtcTick clockTick{};
         clockTick.tick = clocktime.tv_nsec / 1000 + clocktime.tv_sec * 1000000 + UNIX_EPOCH_TICKS;
 
-        sceRtcTickAddMinutes(&clockTick, &clockTick, timeZone);
-        sceRtcSetTick(pTime, &clockTick);
+        returnValue = sceRtcTickAddMinutes(&clockTick, &clockTick, timeZone);
+        if (returnValue == ORBIS_OK) {
+            returnValue = sceRtcSetTick(pTime, &clockTick);
+        }
     }
 
     return returnValue;
@@ -441,10 +461,14 @@ int PS4_SYSV_ABI sceRtcGetCurrentClockLocalTime(OrbisRtcDateTime* pTime) {
         // calculate total timezone offset for converting UTC to local time
         uint64_t tzOffset = -(timeZone.tz_minuteswest - (timeZone.tz_dsttime * 60));
 
-        OrbisRtcTick newTick;
-        sceRtcGetCurrentTick(&newTick);
-        sceRtcTickAddMinutes(&newTick, &newTick, tzOffset);
-        sceRtcSetTick(pTime, &newTick);
+        OrbisRtcTick newTick{};
+        returnValue = sceRtcGetCurrentTick(&newTick);
+        if (returnValue == ORBIS_OK) {
+            returnValue = sceRtcTickAddMinutes(&newTick, &newTick, tzOffset);
+        }
+        if (returnValue == ORBIS_OK) {
+            returnValue = sceRtcSetTick(pTime, &newTick);
+        }
     }
 
     return returnValue;
@@ -992,7 +1016,7 @@ int PS4_SYSV_ABI sceRtcSetTime_t(OrbisRtcDateTime* pTime, time_t llTime) {
         sdk_version = 0;
     }
 
-    OrbisRtcTick newTick;
+    OrbisRtcTick newTick{};
     if (sdk_version < 0x3000000) {
         newTick.tick = (llTime & 0xffffffff) * 1000000;
     } else {
@@ -1003,9 +1027,8 @@ int PS4_SYSV_ABI sceRtcSetTime_t(OrbisRtcDateTime* pTime, time_t llTime) {
     }
 
     newTick.tick += UNIX_EPOCH_TICKS;
-    sceRtcSetTick(pTime, &newTick);
+    return sceRtcSetTick(pTime, &newTick);
 
-    return ORBIS_OK;
 }
 
 int PS4_SYSV_ABI sceRtcSetWin32FileTime(OrbisRtcDateTime* pTime, int64_t ulWin32Time) {
@@ -1016,12 +1039,10 @@ int PS4_SYSV_ABI sceRtcSetWin32FileTime(OrbisRtcDateTime* pTime, int64_t ulWin32
 
     u64 convertedTime = (ulWin32Time / 10) + WIN32_FILETIME_EPOCH_TICKS;
 
-    OrbisRtcTick convertedTick;
+    OrbisRtcTick convertedTick{};
     convertedTick.tick = convertedTime;
 
-    sceRtcSetTick(pTime, &convertedTick);
-
-    return ORBIS_OK;
+    return sceRtcSetTick(pTime, &convertedTick);
 }
 
 int PS4_SYSV_ABI sceRtcTickAddDays(OrbisRtcTick* pTick1, OrbisRtcTick* pTick2, int32_t lAdd) {
@@ -1030,7 +1051,7 @@ int PS4_SYSV_ABI sceRtcTickAddDays(OrbisRtcTick* pTick1, OrbisRtcTick* pTick2, i
     if (pTick1 == nullptr || pTick2 == nullptr)
         return ORBIS_RTC_ERROR_INVALID_POINTER;
 
-    pTick1->tick = (lAdd * 86400000000) + pTick2->tick;
+    pTick1->tick = (static_cast<int64_t>(lAdd) * 86400000000LL) + pTick2->tick;
 
     return ORBIS_OK;
 }
@@ -1041,7 +1062,7 @@ int PS4_SYSV_ABI sceRtcTickAddHours(OrbisRtcTick* pTick1, OrbisRtcTick* pTick2, 
     if (pTick1 == nullptr || pTick2 == nullptr)
         return ORBIS_RTC_ERROR_INVALID_POINTER;
 
-    pTick1->tick = (lAdd * 3600000000) + pTick2->tick;
+    pTick1->tick = (static_cast<int64_t>(lAdd) * 3600000000LL) + pTick2->tick;
 
     return ORBIS_OK;
 }
@@ -1128,7 +1149,7 @@ int PS4_SYSV_ABI sceRtcTickAddSeconds(OrbisRtcTick* pTick1, OrbisRtcTick* pTick2
     if (pTick1 == nullptr || pTick2 == nullptr)
         return ORBIS_RTC_ERROR_INVALID_POINTER;
 
-    pTick1->tick = (lAdd * 1000000) + pTick2->tick;
+    pTick1->tick = (lAdd * 1000000LL) + pTick2->tick;
 
     return ORBIS_OK;
 }
@@ -1150,7 +1171,7 @@ int PS4_SYSV_ABI sceRtcTickAddWeeks(OrbisRtcTick* pTick1, OrbisRtcTick* pTick2, 
     if (pTick1 == nullptr || pTick2 == nullptr)
         return ORBIS_RTC_ERROR_INVALID_POINTER;
 
-    pTick1->tick = (lAdd * 604800000000) + pTick2->tick;
+    pTick1->tick = (static_cast<int64_t>(lAdd) * 604800000000LL) + pTick2->tick;
 
     return ORBIS_OK;
 }

@@ -86,18 +86,19 @@ int PS4_SYSV_ABI sceAppContentAddcontMount(u32 service_label,
             continue;
         }
 
-        // Open the param.sfo in this folder
-        PSF* dlc_params = new PSF();
         const auto& param_sfo_path = entry.path() / "sce_sys/param.sfo";
         if (!std::filesystem::exists(param_sfo_path)) {
             // This folder doesn't have a param.sfo
             continue;
         }
-        dlc_params->Open(param_sfo_path);
+
+        // Open the param.sfo in this folder.
+        PSF dlc_params;
+        dlc_params.Open(param_sfo_path);
 
         // Validate the available params
-        auto category = dlc_params->GetString("CATEGORY");
-        auto content_id = dlc_params->GetString("CONTENT_ID");
+        auto category = dlc_params.GetString("CATEGORY");
+        auto content_id = dlc_params.GetString("CONTENT_ID");
         if (!category.has_value() || strncmp(category.value().data(), "ac", 2) != 0 ||
             !content_id.has_value() ||
             content_id.value().length() <= ORBIS_APP_CONTENT_ENTITLEMENT_LABEL_OFFSET) {
