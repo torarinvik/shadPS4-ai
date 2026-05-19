@@ -1,6 +1,6 @@
 # shadPS4 macOS Games Checklist
 
-`Acquired` here means the game is currently present in the author's `Games` folder as a title-ID directory.
+`Acquired` here means the game is currently present in the `Games` folder as a title-ID directory.
 
 | Acquired | Game | Title ID | Details |
 |---|---|---|---|
@@ -187,18 +187,20 @@ Sorted by approximate PS4 storage size, largest to smallest. Sizes are rough and
 | [ ] | 45 | KINGDOM HEARTS III |
 | [ ] | 45 | Madden NFL 19 |
 | [ ] | 43 | NBA 2K14 |
+| [x] | 41.2 | SWORD ART ONLINE Alicization Lycoris |
 | [ ] | 40 | Call of Duty®: Modern Warfare® Remastered |
 | [ ] | 40 | Dishonored 2 |
 | [ ] | 40 | Prey |
 | [ ] | 40 | RESIDENT EVIL RESISTANCE |
 | [ ] | 39 | KILLZONE™ SHADOW FALL |
-| [x] | ? | Madden NFL 24 |
-| [x] | ? | Madden NFL 25 |
+| [x] | 37.2 | KNACK 2 |
+| [Unavailable] | 36.5 | Fallout 4 |
 | [ ] | 35 | Until Dawn™ |
 | [ ] | 35 | South Park™: The Fractured But Whole™ |
 | [ ] | 35 | HITMAN™ 2 |
 | [ ] | 35 | Earth Defense Force 4.1: The Shadow of New Despair |
 | [ ] | 32 | Crash Bandicoot™ 4: It’s About Time |
+| [x] | 30.1 | Sniper Elite 4 |
 | [ ] | 30 | Madden NFL 16 |
 | [ ] | 30 | Just Cause 3 |
 | [ ] | 30 | Sniper Ghost Warrior 3 |
@@ -211,23 +213,22 @@ Sorted by approximate PS4 storage size, largest to smallest. Sizes are rough and
 | [ ] | 26 | RESIDENT EVIL 2 |
 | [ ] | 25 | RESIDENT EVIL 7 biohazard |
 | [x] | 25 | Need for Speed™ |
+| [Unavailable] | 23.78 | Tony Hawk's™ Pro Skater™ 1 + 2 |
 | [ ] | 23 | LEFT ALIVE |
-| [ ] | 30.1 | Sniper Elite 4 |
-| [X ] | 683 mb | Tokyo 42 |
-| [ X] | 41.2 | SWORD ART ONLINE Alicization Lycoris |
-| [ Unavailable] | 18 | Chicken Police |
-| [ Unavailable] | 16 | ASTRO BOT Rescue Mission |
-| [ Unavailable] | 15 | Moss |
+| [Unavailable] | 18 | Chicken Police |
+| [Unavailable] | 16 | ASTRO BOT Rescue Mission |
+| [Unavailable] | 15 | Moss |
 | [x] | 13 | Tony Hawk's™ Pro Skater™ 3 + 4 |
-| [ Unavailable] | 23.78 | Tony Hawk's™ Pro Skater™ 1 + 2 |
-| [X ] | 12 | FINAL FANTASY XII THE ZODIAC AGE |
-| [ Unavailable] | 12 | Project Highrise: Architect's Edition |
-| [X] | 220 mb | Prison architect |
+| [x] | 12 | FINAL FANTASY XII THE ZODIAC AGE |
+| [Unavailable] | 12 | Project Highrise: Architect's Edition |
 | [x] | 12 | Resident Evil 4 |
 | [x] | 11 | The Witch and the Hundred Knight: Revival Edition |
-| [x] | ? | Final Fantasy X/X-2 HD Remaster |
-| [ Unavailable] | ? | Overwatch: Origins Edition |
+| [x] | 10 | SEGA Genesis Classics |
 | [x] | 6 | Galak-Z |
-| [ X] | 37.2 | KNACK 2 |
-| [ Unavailable] | 36.5 | Fallout 4 |
-| [ Unavailable] | ? | HORROR TALES: The Wine |
+| [x] | 683 mb | Tokyo 42 |
+| [x] | 220 mb | Prison architect |
+| [x] | ? | Madden NFL 24 |
+| [x] | ? | Madden NFL 25 |
+| [x] | ? | Final Fantasy X/X-2 HD Remaster |
+| [Unavailable] | ? | Overwatch: Origins Edition |
+| [Unavailable] | ? | HORROR TALES: The Wine |

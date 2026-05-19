@@ -433,3 +433,4 @@ result
 cppcheck-report.txt
 codeql-results.csv
 clang-tidy-report.txt
+/infer-out
