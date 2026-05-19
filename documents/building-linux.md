@@ -1,21 +1,20 @@
 <!--
 SPDX-FileCopyrightText: 2024 shadPS4 Emulator Project
-SPDX-FileCopyrightText: 2026 Elisa-core port maintainers
+SPDX-FileCopyrightText: 2026 fork maintainers
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
-## Build the Elisa-core PS4 port for Linux
+## Build this shadPS4 fork for Linux
 
 > [!IMPORTANT]
 > These instructions are inherited from the upstream shadPS4 layout and are being
-> adapted for this independent Elisa-core port. Executable names, paths, and
-> screenshots may still use `shadPS4` while the port is in progress. Builds from
-> this repository are not official shadPS4 builds.
+> adapted for this independent fork. Executable names, paths, and screenshots may
+> still use `shadPS4`. Builds from this repository are not official shadPS4 builds.
 
 First and foremost, Clang 18 is the **recommended compiler** because this
 codebase inherits the upstream shadPS4 build configuration. If you build with
 GCC, you might encounter issues. Additionally, if you choose to use GCC, please
-build this port with Clang at least once before creating an issue or submitting a
+build this fork with Clang at least once before creating an issue or submitting a
 pull request.
 
 ## Preparatory steps
@@ -48,9 +47,9 @@ sudo pacman -S base-devel clang git cmake sndio jack2 openal \
     sdl2 vulkan-validation-layers libpng
 ```
 
-**Note**: The upstream `shadps4-git` AUR package is unrelated to this Elisa-core
-port, is not maintained here, and uses the default compiler, which is often set
-to GCC. Use at your own discretion.
+**Note**: The upstream `shadps4-git` AUR package is unrelated to this fork, is
+not maintained here, and uses the default compiler, which is often set to GCC.
+Use at your own discretion.
 
 #### OpenSUSE
 

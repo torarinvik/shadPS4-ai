@@ -1,16 +1,15 @@
 <!--
 SPDX-FileCopyrightText: 2024 shadPS4 Emulator Project
-SPDX-FileCopyrightText: 2026 Elisa-core port maintainers
+SPDX-FileCopyrightText: 2026 fork maintainers
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
- # Debugging and reporting issues for the Elisa-core PS4 port
+ # Debugging and reporting issues for this shadPS4 fork
 
 > [!IMPORTANT]
 > This document is inherited from upstream shadPS4 and is being adapted for this
-> independent Elisa-core port. Please do not report issues from this repository
-> to upstream shadPS4 unless they also reproduce on an unmodified upstream
-> checkout.
+> independent fork. Please do not report issues from this repository to upstream
+> shadPS4 unless they also reproduce on an unmodified upstream checkout.
 
 This document covers information about debugging, troubleshooting and reporting developer-side issues related to this port and games.
 
@@ -29,7 +28,7 @@ RenderDoc doesn't work with Wayland, so to use it you have to run the emulator w
 <summary>Windows and Visual Studio</summary>
 
 Make sure you have the project set up for building on Windows with Visual Studio
-and CMake: [Build the Elisa-core PS4 port for Windows](../building-windows.md)
+and CMake: [Build this shadPS4 fork for Windows](../building-windows.md)
 
 1. Open the project folder in Visual Studio **as a folder**. _Do not run `cmake ..` or other commands that set up the project._
    

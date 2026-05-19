@@ -1,6 +1,6 @@
 <!--
 SPDX-FileCopyrightText: 2024 shadPS4 Emulator Project
-SPDX-FileCopyrightText: 2026 Elisa-core port maintainers
+SPDX-FileCopyrightText: 2026 fork maintainers
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
@@ -8,8 +8,8 @@ SPDX-License-Identifier: GPL-2.0-or-later
 
 > [!IMPORTANT]
 > This note is inherited from upstream shadPS4 and is being adapted for this
-> independent Elisa-core port. Paths and executable names may still use inherited
-> shadPS4 conventions while the port is in progress.
+> independent fork. Paths and executable names may still use inherited
+> shadPS4 conventions.
 
 1. Enable `dumpShaders` in config.toml
 

@@ -1,16 +1,15 @@
 <!--
 SPDX-FileCopyrightText: 2025 shadPS4 Emulator Project
-SPDX-FileCopyrightText: 2026 Elisa-core port maintainers
+SPDX-FileCopyrightText: 2026 fork maintainers
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
-# Build the Elisa-core PS4 port for Windows
+# Build this shadPS4 fork for Windows
 
 > [!IMPORTANT]
 > These instructions are inherited from the upstream shadPS4 layout and are being
-> adapted for this independent Elisa-core port. Executable names, paths, and
-> screenshots may still use `shadPS4` while the port is in progress. Builds from
-> this repository are not official shadPS4 builds.
+> adapted for this independent fork. Executable names, paths, and screenshots may
+> still use `shadPS4`. Builds from this repository are not official shadPS4 builds.
 
 This tutorial reads as if you have none of the prerequisites already installed. If you do, just ignore the steps regarding installation.
 > [!WARNING]
@@ -126,12 +125,12 @@ __This will install the necessary components to build this port.__
 ### Project structure
 
 ```
-elisa-core-ps4-port/
+shadps4-ai-fork/
   ├── shared (repository files)
-  └── elisa-core-ps4-port.code-workspace
+  └── shadps4-ai-fork.code-workspace
 ```
 
-### Content of `elisa-core-ps4-port.code-workspace`
+### Content of `shadps4-ai-fork.code-workspace`
 
 ```json
 {
@@ -177,7 +176,7 @@ elisa-core-ps4-port/
 
 ### Cloning the source code
 
-1. Open your terminal and go to the repository folder, for example: `cd elisa-core-ps4-port\shared`
+1. Open your terminal and go to the repository folder, for example: `cd shadps4-ai-fork\shared`
 3. Clone the repository by running  
     `git clone --depth 1 --recursive <this-repository-url> .`
 
@@ -200,12 +199,12 @@ _These plugins are suggested in the workspace file above and are already configu
 ![Clang Format](Screenshots/Windows/vscode-ext-3.png)
 
 ### Building
-1. Open VS Code, `File > Open workspace from file > elisa-core-ps4-port.code-workspace`
+1. Open VS Code, `File > Open workspace from file > shadps4-ai-fork.code-workspace`
 2. Go to the CMake Tools extension on left side bar
 3. Change Clang x64 Debug to Clang x64 Release if you want a regular, non-debug build.
 4. Click build.
 
-Your transitional `shadps4.exe` build will be in `elisa-core-ps4-port\shared\Build\x64-Clang-Release\`
+Your `shadps4.exe` build will be in `shadps4-ai-fork\shared\Build\x64-Clang-Release\`
 
 ## Option 3: MSYS2/MinGW
 

@@ -1,44 +1,49 @@
 <!--
 SPDX-FileCopyrightText: 2026 shadPS4 Emulator Project
-SPDX-FileCopyrightText: 2026 Elisa-core port maintainers
+SPDX-FileCopyrightText: 2026 fork maintainers
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
-# Elisa-core PS4 Emulator Port
+# shadPS4 Experimental AI-Friendly Fork
 
 > [!IMPORTANT]
-> This repository is an independent, incremental port and rework of portions of
-> the [shadPS4](https://github.com/shadps4-emu/shadPS4) codebase toward
-> Elisa-core. It is not the official shadPS4 repository, is not maintained by the
-> shadPS4 team, and is not endorsed by the shadPS4 project.
+> This repository is an independent fork derived from
+> [shadPS4](https://github.com/shadps4-emu/shadPS4). It is not the official
+> shadPS4 repository, is not maintained by the shadPS4 team, and is not endorsed
+> by the shadPS4 project.
 
-This project currently contains transitional C++ code derived from shadPS4 while
-selected emulator systems are moved into Elisa-core. During that work, file names,
-build targets, executable names, configuration paths, and documentation may still
-refer to `shadPS4` or `shadps4`. Those references describe the inherited or
-not-yet-renamed code, not an official upstream release.
+This fork exists so we can experiment quickly, test compatibility fixes, and
+accept AI-generated or AI-assisted submissions in a space where that workflow is
+explicitly allowed. It is not meant to undermine, replace, or negate the work of
+the official shadPS4 project. Quite the opposite: if you care about PS4
+emulation, please support the official project and its maintainers.
 
 Please do not report issues from this repository to the upstream shadPS4 project
 unless the same issue is reproducible on an unmodified upstream checkout.
 
+## Parallel Porting Work
+
+A separate port of this work to Elisa is being developed at the same time. This
+repository is kept focused on the C++ codebase so emulator debugging and
+compatibility work can continue without mixing in porting glue. A link to the
+separate Elisa port will be added later.
+
 ## Project Status
 
-This repository is a work in progress. The goal is an incremental port of the
-emulator core into Elisa-core, so the codebase may temporarily contain upstream
-C++ structure, compatibility wrappers, incomplete integrations, and behavior that
-differs from both Elisa-core and upstream shadPS4.
+This repository is a work in progress. It contains C++ code derived from
+upstream shadPS4 plus local experiments, diagnostics, compatibility fixes, and
+platform-specific investigations. Some behavior may differ from upstream.
 
 ## macOS Compatibility Snapshot
 
 Current compatibility testing is focused on macOS, especially Apple Silicon Macs
-running the inherited Vulkan renderer through MoltenVK. Unless a row explicitly
-says otherwise, the results below have **not** been validated on Linux or
-Windows.
+running the Vulkan renderer through MoltenVK. Unless a row explicitly says
+otherwise, the results below have **not** been validated on Linux or Windows.
 
-This is not a polished compatibility list yet; it is a living dogfood log for
-the Elisa-core port. The fuller, messier test record lives in
-[GamesChecklist.md](GamesChecklist.md). These are the titles that currently
-stand out as working or meaningfully playable in our local macOS testing:
+This is not a polished compatibility list yet; it is a living dogfood log. The
+fuller, messier test record lives in [GamesChecklist.md](GamesChecklist.md).
+These are the titles that currently stand out as working or meaningfully
+playable in local macOS testing:
 
 | Game | Title ID | Current macOS result | What changed here |
 |---|---|---|---|
@@ -62,21 +67,20 @@ If you want the official shadPS4 project, use:
 
 ## Upstream Attribution
 
-This work is derived from and incrementally ports code from
-[shadPS4](https://github.com/shadps4-emu/shadPS4), which is licensed under
-GPL-2.0-or-later. Original shadPS4 copyright notices, license terms, and source
-attribution are preserved.
+This work is derived from [shadPS4](https://github.com/shadps4-emu/shadPS4),
+which is licensed under GPL-2.0-or-later. Original shadPS4 copyright notices,
+license terms, and source attribution are preserved.
 
 The original shadPS4 authors are not responsible for changes made in this
-repository. Elisa-core port maintainers are responsible for modifications,
-integration choices, support, and release artifacts produced from this repository.
+repository. This fork's maintainers are responsible for modifications,
+integration choices, support, and release artifacts produced from this
+repository.
 
 See [NOTICE.md](NOTICE.md) for the fuller attribution and non-affiliation notice.
 
 ## Building
 
-Build instructions are inherited from the upstream shadPS4 layout and are being
-updated as the Elisa-core port evolves:
+Build instructions are inherited from the upstream shadPS4 layout:
 
 - [Docker build instructions](documents/building-docker.md)
 - [Windows build instructions](documents/building-windows.md)
@@ -84,14 +88,13 @@ updated as the Elisa-core port evolves:
 - [macOS build instructions](documents/building-macos.md)
 
 Some commands still produce an executable named `shadps4` or `shadPS4.exe`.
-That name is transitional and does not mean the artifact is an official shadPS4
-build.
+That inherited name does not mean the artifact is an official shadPS4 build.
 
 ## Usage Examples
 
-The inherited command-line interface can be inspected with `--help`.
+The command-line interface can be inspected with `--help`.
 
-Common command patterns may still use the transitional `shadPS4` executable name:
+Common command patterns:
 
 ```sh
 shadPS4 CUSA00001
@@ -106,14 +109,14 @@ shadPS4 CUSA00001 -- -flag1 -flag2
 For local development and troubleshooting, see
 [Debugging and reporting issues](documents/Debugging/Debugging.md).
 
-Issue reports for this port should go to this repository's maintainers. Upstream
-shadPS4 support channels should only be used for issues reproduced on unmodified
-upstream shadPS4.
+Issue reports for this fork should go to this repository's maintainers.
+Upstream shadPS4 support channels should only be used for issues reproduced on
+unmodified upstream shadPS4.
 
 ## Firmware Files
 
-The inherited emulator core can load some PlayStation 4 firmware files. Supported
-modules must be placed in the `sys_modules` folder expected by the current build.
+The emulator core can load some PlayStation 4 firmware files. Supported modules
+must be placed in the `sys_modules` folder expected by the current build.
 
 | Modules                  | Modules                  | Modules                  | Modules                  |
 |--------------------------|--------------------------|--------------------------|--------------------------|
@@ -128,8 +131,9 @@ modules must be placed in the `sys_modules` folder expected by the current build
 
 ## Contributing
 
-Anyone can contribute, read the file below for more info.
-[CONTRIBUTING.md](CONTRIBUTING.md) 
+Anyone can contribute. AI-generated and AI-assisted submissions are welcome when
+they work, are understandable, and preserve license attribution. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 When contributing code derived from upstream shadPS4, preserve license headers,
 copyright notices, and attribution.

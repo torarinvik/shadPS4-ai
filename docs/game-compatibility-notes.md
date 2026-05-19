@@ -1,14 +1,14 @@
-# Elisa shadPS4 game compatibility notes
+# shadPS4 fork game compatibility notes
 
 Last updated: 2026-05-15
 
-These notes track the local Elisa fork test state on macOS using the current checkout and the
-`build-elisa-x64/shadps4` binary. They are diagnostic notes, not a general compatibility list.
+These notes track the local fork test state on macOS using the current checkout and the
+`build/shadps4` binary. They are diagnostic notes, not a general compatibility list.
 
-Use the Elisa checkout only:
+Use this checkout only:
 
 ```sh
-cd "/Users/torarinvikbjarko/Documents/Coding Projects/Go projects/Elisa-core/shadPS4"
+cd "/path/to/this/shadPS4-fork"
 ```
 
 Normal game runs should not use `SHADPS4_DISABLE_GPU_MEMORY_PROTECTION=1`; that option caused
@@ -37,13 +37,13 @@ TMNT:
 SHADPS4_STRICT_RENDER_VALIDATION=1 \
 SHADPS4_TRACE_RENDER=0 \
 SHADPS4_VIDEOOUT_UNORM=1 \
-./build-elisa-x64/shadps4 -g Games/CUSA30991/eboot.bin
+./build/shadps4 -g Games/CUSA30991/eboot.bin
 ```
 
 UFC trace:
 
 ```sh
-SHADPS4_BIN=./build-elisa-x64/shadps4 \
+SHADPS4_BIN=./build/shadps4 \
 SHADPS4_STRICT_RENDER_VALIDATION=1 \
 SHADPS4_TRACE_RENDER=0 \
 SHADPS4_VIDEOOUT_UNORM=1 \
@@ -53,7 +53,7 @@ scripts/run_ufc_trace.sh
 UFC strict black-screen trace:
 
 ```sh
-SHADPS4_BIN=./build-elisa-x64/shadps4 \
+SHADPS4_BIN=./build/shadps4 \
 SHADPS4_STRICT_RENDER_VALIDATION=1 \
 SHADPS4_STRICT_BLACK_SCREEN_WATCHDOG=1 \
 SHADPS4_TRACE_IMAGE_VIEW_INVARIANTS=1 \
@@ -114,4 +114,3 @@ and the emulator asserted internally. The current local fix:
 - rejects null/misaligned `sceKernelMunmap` ranges with `ORBIS_KERNEL_ERROR_EINVAL`,
 - returns an error for invalid unmap ranges instead of asserting,
 - adds optional `SHADPS4_TRACE_SIGNAL_SYMBOLS=1` for future host-side signal diagnostics.
-

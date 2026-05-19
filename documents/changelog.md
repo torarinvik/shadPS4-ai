@@ -1,7 +1,7 @@
 > [!IMPORTANT]
 > This changelog is inherited from upstream shadPS4 and is retained for
 > attribution and historical context. It does not describe official releases of
-> this independent Elisa-core port.
+> this independent fork.
 
 v0.4.0 31/10/2024 - codename divicius
 =================

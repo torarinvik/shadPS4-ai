@@ -1,16 +1,15 @@
 <!--
 SPDX-FileCopyrightText: 2024 shadPS4 Emulator Project
-SPDX-FileCopyrightText: 2026 Elisa-core port maintainers
+SPDX-FileCopyrightText: 2026 fork maintainers
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
-## Build the Elisa-core PS4 port for macOS
+## Build this shadPS4 fork for macOS
 
 > [!IMPORTANT]
 > These instructions are inherited from the upstream shadPS4 layout and are being
-> adapted for this independent Elisa-core port. Executable names and paths may
-> still use `shadPS4` while the port is in progress. Builds from this repository
-> are not official shadPS4 builds.
+> adapted for this independent fork. Executable names and paths may still use
+> `shadPS4`. Builds from this repository are not official shadPS4 builds.
 
 ### Install the necessary tools to build this port:
 
