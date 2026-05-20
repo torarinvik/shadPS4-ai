@@ -1183,16 +1183,19 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
             // storage and feedback loop doesn't make sense for them
             if ((image.binding.force_general || image.binding.is_target) &&
                 !image.info.props.is_depth) {
+                vk::AccessFlags2 access_mask = vk::AccessFlagBits2::eShaderRead;
+                if (image.binding.force_general) {
+                    access_mask |= vk::AccessFlagBits2::eShaderWrite;
+                }
+                if (image.binding.is_target) {
+                    access_mask |= vk::AccessFlagBits2::eColorAttachmentWrite |
+                                   vk::AccessFlagBits2::eColorAttachmentRead;
+                }
                 image.Transit(instance.IsAttachmentFeedbackLoopLayoutSupported() &&
                                       image.binding.is_target
                                   ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT
                                   : vk::ImageLayout::eGeneral,
-                              vk::AccessFlagBits2::eShaderRead |
-                                  (image.info.props.is_depth
-                                       ? vk::AccessFlagBits2::eDepthStencilAttachmentWrite
-                                       : vk::AccessFlagBits2::eColorAttachmentWrite |
-                                             vk::AccessFlagBits2::eColorAttachmentRead),
-                              {});
+                              access_mask, {});
             } else {
                 if (is_storage) {
                     image.Transit(vk::ImageLayout::eGeneral,
