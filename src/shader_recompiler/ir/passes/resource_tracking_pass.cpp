@@ -10,6 +10,7 @@
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/ir/reinterpret.h"
 #include "shader_recompiler/profile.h"
+#include "common/assert.h"
 #include "video_core/amdgpu/resource.h"
 
 namespace Shader::Optimization {
@@ -306,6 +307,9 @@ private:
 
 std::pair<const IR::Inst*, bool> TryDisableAnisoLod0(const IR::Inst* inst) {
     std::pair not_found{inst, false};
+    if (!inst) {
+        return not_found;
+    }
 
     // Assuming S# is in UD s[12:15] and T# is in s[4:11]
     // The next pattern:
@@ -320,23 +324,29 @@ std::pair<const IR::Inst*, bool> TryDisableAnisoLod0(const IR::Inst* inst) {
     }
 
     // Select should be based on zero check
-    const auto* prod0 = inst->Arg(0).InstRecursive();
+    const auto* prod0 = inst->Arg(0).TryInstRecursive();
+    if (!prod0) {
+        return not_found;
+    }
     if (prod0->GetOpcode() != IR::Opcode::IEqual32 ||
         !(prod0->Arg(1).IsImmediate() && prod0->Arg(1).U32() == 0u)) {
         return not_found;
     }
 
     // The bitfield extract might be hidden by phi sometimes
-    auto* prod0_arg0 = prod0->Arg(0).InstRecursive();
+    const auto* prod0_arg0 = prod0->Arg(0).TryInstRecursive();
+    if (!prod0_arg0) {
+        return not_found;
+    }
     if (prod0_arg0->GetOpcode() == IR::Opcode::Phi) {
         auto arg0 = prod0_arg0->Arg(0);
         auto arg1 = prod0_arg0->Arg(1);
-        if (!arg0.IsImmediate() &&
-            arg0.InstRecursive()->GetOpcode() == IR::Opcode::BitFieldUExtract) {
-            prod0_arg0 = arg0.InstRecursive();
-        } else if (!arg1.IsImmediate() &&
-                   arg1.InstRecursive()->GetOpcode() == IR::Opcode::BitFieldUExtract) {
-            prod0_arg0 = arg1.InstRecursive();
+        const auto* arg0_inst = arg0.TryInstRecursive();
+        const auto* arg1_inst = arg1.TryInstRecursive();
+        if (arg0_inst && arg0_inst->GetOpcode() == IR::Opcode::BitFieldUExtract) {
+            prod0_arg0 = arg0_inst;
+        } else if (arg1_inst && arg1_inst->GetOpcode() == IR::Opcode::BitFieldUExtract) {
+            prod0_arg0 = arg1_inst;
         }
     }
 
@@ -348,13 +358,19 @@ std::pair<const IR::Inst*, bool> TryDisableAnisoLod0(const IR::Inst* inst) {
     }
 
     // Make sure mask is masking out anisotropy
-    const auto* prod1 = inst->Arg(1).InstRecursive();
+    const auto* prod1 = inst->Arg(1).TryInstRecursive();
+    if (!prod1) {
+        return not_found;
+    }
     if (prod1->GetOpcode() != IR::Opcode::BitwiseAnd32 || prod1->Arg(1).U32() != 0xfffff1ff) {
         return not_found;
     }
 
     // We're working on the first dword of s#
-    const auto* prod2 = inst->Arg(2).InstRecursive();
+    const auto* prod2 = inst->Arg(2).TryInstRecursive();
+    if (!prod2) {
+        return not_found;
+    }
     if (prod2->GetOpcode() != IR::Opcode::GetUserData &&
         prod2->GetOpcode() != IR::Opcode::ReadConst && prod2->GetOpcode() != IR::Opcode::Phi) {
         return not_found;
@@ -366,12 +382,19 @@ std::pair<const IR::Inst*, bool> TryDisableAnisoLod0(const IR::Inst* inst) {
 using SharpSources = boost::container::small_vector<const IR::Inst*, 4>;
 
 bool IsSharpSource(const IR::Inst* inst) {
+    if (!inst) {
+        return false;
+    }
     return inst->GetOpcode() == IR::Opcode::GetUserData ||
            inst->GetOpcode() == IR::Opcode::ReadConst;
 }
 
 SharpSources FindSharpSources(const IR::Inst* handle, u32 pc) {
     SharpSources sources;
+    if (!handle) {
+        LOG_WARNING(Render_Recompiler, "Unable to find sharp sources pc={:#x}: null handle", pc);
+        return sources;
+    }
     if (IsSharpSource(handle)) {
         sources.push_back(handle);
         return sources;
@@ -396,10 +419,10 @@ SharpSources FindSharpSources(const IR::Inst* handle, u32 pc) {
         }
         for (size_t arg = inst->NumArgs(); arg--;) {
             const IR::Value arg_value = inst->Arg(arg);
-            if (arg_value.IsImmediate()) {
+            const IR::Inst* arg_inst = arg_value.TryInstRecursive();
+            if (!arg_inst) {
                 continue;
             }
-            const IR::Inst* arg_inst = arg_value.InstRecursive();
             if (std::ranges::find(visited, arg_inst) == visited.end()) {
                 visited.push_back(arg_inst);
                 queue.push(arg_inst);
@@ -408,9 +431,9 @@ SharpSources FindSharpSources(const IR::Inst* handle, u32 pc) {
     }
     if (sources.empty()) {
         if (found_read_const_buffer) {
-            UNREACHABLE_MSG("Bindless sharp access detected pc={:#x}", pc);
+            LOG_WARNING(Render_Recompiler, "Bindless sharp access detected pc={:#x}", pc);
         } else {
-            UNREACHABLE_MSG("Unable to find sharp sources pc={:#x}", pc);
+            LOG_WARNING(Render_Recompiler, "Unable to find sharp sources pc={:#x}", pc);
         }
     }
     return sources;
@@ -456,8 +479,16 @@ SharpLocation SharpLocationFromSource(const IR::Inst* inst) {
     }
 }
 
-SharpLocation TrackSharp(const IR::Inst* inst, const IR::Block& current_parent, u32 pc = 0) {
+std::optional<SharpLocation> TrackSharp(const IR::Inst* inst, const IR::Block& current_parent,
+                                        u32 pc = 0) {
+    if (!inst) {
+        LOG_WARNING(Render_Recompiler, "Unable to track sharp pc={:#x}: null instruction", pc);
+        return std::nullopt;
+    }
     auto sources = FindSharpSources(inst, pc);
+    if (sources.empty()) {
+        return std::nullopt;
+    }
     size_t num_sources = sources.size();
     ASSERT(current_parent.cfg_block);
 
@@ -486,13 +517,59 @@ SharpLocation TrackSharp(const IR::Inst* inst, const IR::Block& current_parent, 
         }
     }
 
-    ASSERT_MSG(sources.size() == 1, "Unable to deduce sharp source");
+    if (sources.size() != 1) {
+        LOG_WARNING(Render_Recompiler,
+                    "Unable to deduce unique sharp source pc={:#x}; using first of {} candidates",
+                    pc, sources.size());
+    }
     return SharpLocationFromSource(sources[0]);
+}
+
+void DropUnsupportedImageInstruction(IR::Block& block, IR::Inst& inst, u32 pc) {
+    IR::IREmitter ir{block, IR::Block::InstructionList::s_iterator_to(inst)};
+    LOG_WARNING(Render_Recompiler,
+                "Dropping image instruction without trackable sharp pc={:#x} opcode={}", pc,
+                inst.GetOpcode());
+
+    switch (inst.GetOpcode()) {
+    case IR::Opcode::ImageRead:
+    case IR::Opcode::ImageSampleRaw: {
+        const auto zero = ir.Imm32(0.0f);
+        inst.ReplaceUsesWith(ir.CompositeConstruct(zero, zero, zero, zero));
+        return;
+    }
+    case IR::Opcode::ImageQueryDimensions:
+        inst.ReplaceUsesWith(
+            ir.CompositeConstruct(ir.Imm32(0u), ir.Imm32(0u), ir.Imm32(0u), ir.Imm32(0u)));
+        return;
+    case IR::Opcode::ImageQueryLod:
+        inst.ReplaceUsesWith(ir.Imm32(0u));
+        return;
+    default:
+        if (IsImageAtomicInstruction(inst)) {
+            inst.ReplaceUsesWith(ir.Imm32(0u));
+        }
+        inst.Invalidate();
+        return;
+    }
 }
 
 void PatchBufferSharp(IR::Block& block, IR::Inst& inst, Info& info, Descriptors& descriptors,
                       const Profile& profile) {
-    IR::Inst* handle = inst.Arg(0).InstRecursive();
+    IR::Inst* handle = inst.Arg(0).TryInstRecursive();
+    if (!handle) {
+        const auto inst_info = inst.Flags<IR::BufferInstInfo>();
+        LOG_WARNING(Render_Recompiler,
+                    "Dropping buffer instruction with invalid handle pc={:#x} opcode={}",
+                    inst_info.pc.Value(), inst.GetOpcode());
+        IR::IREmitter ir{block, IR::Block::InstructionList::s_iterator_to(inst)};
+        if (IsBufferStore(inst)) {
+            inst.Invalidate();
+        } else {
+            inst.ReplaceUsesWith(ir.Imm32(0u));
+        }
+        return;
+    }
     u32 buffer_binding = 0;
     if (handle->AreAllArgsImmediates()) {
         // Assuming V# is in UD s[32:35]
@@ -517,12 +594,24 @@ void PatchBufferSharp(IR::Block& block, IR::Inst& inst, Info& info, Descriptors&
         });
     } else {
         // Normal buffer resource.
-        IR::Inst* buffer_handle = handle->Arg(0).InstRecursive();
+        IR::Inst* buffer_handle = handle->Arg(0).TryInstRecursive();
         const auto inst_info = inst.Flags<IR::BufferInstInfo>();
         const auto sharp_idx = TrackSharp(buffer_handle, block, inst_info.pc);
-        const auto buffer = info.ReadUdSharp<AmdGpu::Buffer>(sharp_idx);
+        if (!sharp_idx) {
+            LOG_WARNING(Render_Recompiler,
+                        "Dropping buffer instruction without trackable sharp pc={:#x} opcode={}",
+                        inst_info.pc.Value(), inst.GetOpcode());
+            IR::IREmitter ir{block, IR::Block::InstructionList::s_iterator_to(inst)};
+            if (IsBufferStore(inst)) {
+                inst.Invalidate();
+            } else {
+                inst.ReplaceUsesWith(ir.Imm32(0u));
+            }
+            return;
+        }
+        const auto buffer = info.ReadUdSharp<AmdGpu::Buffer>(*sharp_idx);
         buffer_binding = descriptors.Add(BufferResource{
-            .sharp_idx = sharp_idx,
+            .sharp_idx = *sharp_idx,
             .used_types = BufferDataType(inst, profile, buffer.GetNumberFmt()),
             .buffer_type = BufferType::Guest,
             .is_written = IsBufferStore(inst),
@@ -540,8 +629,12 @@ void PatchImageSharp(IR::Block& block, IR::Inst& inst, Info& info, Descriptors& 
                      const Profile& profile) {
     // Read image sharp.
     const auto inst_info = inst.Flags<IR::TextureInstInfo>();
-    const IR::Inst* image_handle = inst.Arg(0).InstRecursive();
+    const IR::Inst* image_handle = inst.Arg(0).TryInstRecursive();
     const auto tsharp = TrackSharp(image_handle, block, inst_info.pc);
+    if (!tsharp) {
+        DropUnsupportedImageInstruction(block, inst, inst_info.pc);
+        return;
+    }
     const bool is_atomic = IsImageAtomicInstruction(inst);
     const bool is_written = inst.GetOpcode() == IR::Opcode::ImageWrite || is_atomic;
     const bool is_storage =
@@ -551,7 +644,7 @@ void PatchImageSharp(IR::Block& block, IR::Inst& inst, Info& info, Descriptors& 
     const bool needs_mip_storage_fallback =
         inst_info.has_lod && is_written && !profile.supports_image_load_store_lod;
     ImageResource image_res = {
-        .sharp_idx = tsharp,
+        .sharp_idx = *tsharp,
         .is_depth = bool(inst_info.is_depth),
         .is_atomic = is_atomic,
         .is_array = bool(inst_info.is_array),
@@ -618,7 +711,7 @@ void PatchImageSharp(IR::Block& block, IR::Inst& inst, Info& info, Descriptors& 
 
             // Track FMask resource to do specialization.
             descriptors.Add(FMaskResource{
-                .sharp_idx = tsharp,
+                .sharp_idx = *tsharp,
             });
             return;
         }
@@ -633,8 +726,20 @@ void PatchImageSharp(IR::Block& block, IR::Inst& inst, Info& info, Descriptors& 
 
     if (inst.GetOpcode() == IR::Opcode::ImageSampleRaw) {
         u32 sampler_binding = 0;
-        const IR::Inst* sampler = inst.Arg(1).InstRecursive();
-        ASSERT(sampler && sampler->GetOpcode() == IR::Opcode::CompositeConstructU32x4);
+        const IR::Inst* sampler = inst.Arg(1).TryInstRecursive();
+        if (!sampler || sampler->GetOpcode() != IR::Opcode::CompositeConstructU32x4) {
+            LOG_WARNING(Render_Recompiler,
+                        "Falling back to inline sampler for invalid sampler handle pc={:#x}",
+                        inst_info.pc.Value());
+            sampler_binding = descriptors.Add(SamplerResource{
+                .sharp_idx = std::numeric_limits<u32>::max(),
+                .inline_sampler = AmdGpu::Sampler{},
+                .is_inline_sampler = true,
+                .associated_image = image_binding,
+            });
+            inst.SetArg(0, ir.Imm32(image_binding | sampler_binding << 16));
+            return;
+        }
         // Inline sampler resource.
         if (sampler->AreAllArgsImmediates()) {
             const auto inline_sampler = AmdGpu::Sampler{
@@ -648,11 +753,26 @@ void PatchImageSharp(IR::Block& block, IR::Inst& inst, Info& info, Descriptors& 
             });
         } else {
             // Normal sampler resource.
+            const IR::Inst* sampler_base = sampler->Arg(0).TryInstRecursive();
             const auto& [sampler_handle, disable_aniso] =
-                TryDisableAnisoLod0(sampler->Arg(0).InstRecursive());
+                TryDisableAnisoLod0(sampler_base);
             const auto ssharp = TrackSharp(sampler_handle, block, inst_info.pc);
+            if (!ssharp) {
+                LOG_WARNING(Render_Recompiler,
+                            "Falling back to inline sampler for untrackable sampler sharp pc={:#x}",
+                            inst_info.pc.Value());
+                sampler_binding = descriptors.Add(SamplerResource{
+                    .sharp_idx = std::numeric_limits<u32>::max(),
+                    .inline_sampler = AmdGpu::Sampler{},
+                    .is_inline_sampler = true,
+                    .associated_image = image_binding,
+                    .disable_aniso = disable_aniso,
+                });
+                inst.SetArg(1, ir.Imm32(sampler_binding << 16 | image_binding));
+                return;
+            }
             sampler_binding = descriptors.Add(SamplerResource{
-                .sharp_idx = ssharp,
+                .sharp_idx = *ssharp,
                 .is_inline_sampler = false,
                 .associated_image = image_binding,
                 .disable_aniso = disable_aniso,

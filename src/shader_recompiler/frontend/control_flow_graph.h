@@ -58,6 +58,7 @@ private:
     void EmitBlocks();
     void LinkBlocks();
     void SplitDivergenceScopes();
+    void PruneUnreachableBlocks();
 
     void AddLabel(Label address) {
         const auto it = std::ranges::find(labels, address);

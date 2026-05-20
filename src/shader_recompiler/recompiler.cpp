@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdlib>
+
+#include <magic_enum/magic_enum.hpp>
+
 #include "shader_recompiler/frontend/control_flow_graph.h"
 #include "shader_recompiler/frontend/decode.h"
 #include "shader_recompiler/frontend/structured_control_flow.h"
@@ -10,6 +14,13 @@
 #include "shader_recompiler/recompiler.h"
 
 namespace Shader {
+
+static std::string OperandTraceString(const Gcn::InstOperand& operand) {
+    return fmt::format("{}:{}:type={}:code={}",
+                       magic_enum::enum_name(operand.field),
+                       std::to_underlying(operand.field), std::to_underlying(operand.type),
+                       operand.code);
+}
 
 IR::BlockList GenerateBlocks(const IR::AbstractSyntaxList& syntax_list) {
     size_t num_syntax_blocks{};
@@ -42,8 +53,42 @@ IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Inf
     // Decode and save instructions
     IR::Program program{info};
     program.ins_list.reserve(code.size());
+    u32 decode_pc = 0;
     while (!slice.atEnd()) {
-        program.ins_list.emplace_back(decoder.decodeInstruction(slice));
+        const u32 token = slice.at(0);
+        if (Gcn::GetInstructionEncoding(token) == Gcn::InstEncoding::ILLEGAL &&
+            !program.ins_list.empty()) {
+            LOG_WARNING(Render_Recompiler,
+                        "Stopping shader decode at pc={:#x}: illegal encoding token {:#x} after "
+                        "{} instructions. Treating remaining dwords as trailing metadata.",
+                        decode_pc, token, program.ins_list.size());
+            break;
+        }
+        auto inst = decoder.decodeInstruction(slice);
+        if (inst.category == Gcn::InstCategory::Undefined && !program.ins_list.empty()) {
+            LOG_WARNING(Render_Recompiler,
+                        "Stopping shader decode at pc={:#x}: undefined opcode {} after {} "
+                        "instructions. Treating remaining dwords as trailing metadata.",
+                        decode_pc, static_cast<u32>(inst.opcode), program.ins_list.size());
+            break;
+        }
+        decode_pc += inst.length;
+        program.ins_list.emplace_back(inst);
+    }
+    if (std::getenv("SHADPS4_TRACE_SHADER_DECODE") != nullptr) {
+        u32 pc = 0;
+        for (size_t i = 0; i < program.ins_list.size(); ++i) {
+            const auto& inst = program.ins_list[i];
+            LOG_WARNING(Render_Recompiler,
+                        "Decoded shader inst index={} pc={:#x} len={} opcode={} ({}) category={} "
+                        "src=[{}, {}, {}, {}] dst=[{}, {}]",
+                        i, pc, inst.length, static_cast<u32>(inst.opcode),
+                        magic_enum::enum_name(inst.opcode), static_cast<u32>(inst.category),
+                        OperandTraceString(inst.src[0]), OperandTraceString(inst.src[1]),
+                        OperandTraceString(inst.src[2]), OperandTraceString(inst.src[3]),
+                        OperandTraceString(inst.dst[0]), OperandTraceString(inst.dst[1]));
+            pc += inst.length;
+        }
     }
 
     // Clear any previous pooled data.

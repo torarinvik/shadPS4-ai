@@ -3,6 +3,7 @@
 
 #include "shader_recompiler/frontend/translate/translate.h"
 #include "shader_recompiler/profile.h"
+#include "common/logging/log.h"
 
 namespace Shader::Gcn {
 
@@ -23,7 +24,9 @@ static Interpolation GetInterpolation(IR::Attribute attribute) {
     case IR::Attribute::BaryCoordSmoothSample:
         return {Qualifier::Smooth, Qualifier::Sample};
     default:
-        UNREACHABLE_MSG("Unhandled barycentric attribute {}", NameOf(attribute));
+        LOG_WARNING(Render_Recompiler, "Unhandled barycentric attribute {}; using smooth center",
+                    NameOf(attribute));
+        return {Qualifier::Smooth, Qualifier::None};
     }
 }
 
@@ -55,6 +58,12 @@ void Translator::V_INTERP_P1_F32(const GcnInst& inst) {
         return;
     }
     const u32 attr_index = inst.control.vintrp.attr;
+    if (attr_index >= runtime_info.fs_info.num_inputs ||
+        attr_index >= runtime_info.fs_info.inputs.size()) {
+        LOG_WARNING(Render_Recompiler, "Skipping V_INTERP_P1 with invalid attr index {}",
+                    attr_index);
+        return;
+    }
     const auto& attr = runtime_info.fs_info.inputs[attr_index];
     if (attr.IsDefault()) {
         return;
@@ -70,6 +79,13 @@ void Translator::V_INTERP_P1_F32(const GcnInst& inst) {
 
 void Translator::V_INTERP_P2_F32(const GcnInst& inst) {
     const u32 attr_index = inst.control.vintrp.attr;
+    if (attr_index >= runtime_info.fs_info.num_inputs ||
+        attr_index >= runtime_info.fs_info.inputs.size()) {
+        LOG_WARNING(Render_Recompiler, "Replacing V_INTERP_P2 with zero for invalid attr index {}",
+                    attr_index);
+        SetDst(inst.dst[0], ir.Imm32(0.f));
+        return;
+    }
     const IR::Attribute attrib = IR::Attribute::Param0 + attr_index;
     const auto& attr = runtime_info.fs_info.inputs[attr_index];
     auto& interp = info.fs_interpolation[attr_index];
@@ -80,7 +96,15 @@ void Translator::V_INTERP_P2_F32(const GcnInst& inst) {
     }
     ASSERT(!attr.is_flat);
     if (!profile.needs_manual_interpolation) {
-        interp = GetInterpolation(vgpr_to_interp[inst.src[0].code]);
+        if (inst.src[0].code >= vgpr_to_interp.size()) {
+            LOG_WARNING(Render_Recompiler,
+                        "V_INTERP_P2 source VGPR {} has no interpolation mapping; using smooth "
+                        "center",
+                        inst.src[0].code);
+            interp = {Qualifier::Smooth, Qualifier::None};
+        } else {
+            interp = GetInterpolation(vgpr_to_interp[inst.src[0].code]);
+        }
         SetDst(inst.dst[0], ir.GetAttribute(attrib, inst.control.vintrp.chan));
         return;
     }
@@ -95,6 +119,13 @@ void Translator::V_INTERP_P2_F32(const GcnInst& inst) {
 
 void Translator::V_INTERP_MOV_F32(const GcnInst& inst) {
     const u32 attr_index = inst.control.vintrp.attr;
+    if (attr_index >= runtime_info.fs_info.num_inputs ||
+        attr_index >= runtime_info.fs_info.inputs.size()) {
+        LOG_WARNING(Render_Recompiler, "Replacing V_INTERP_MOV with zero for invalid attr index {}",
+                    attr_index);
+        SetDst(inst.dst[0], ir.Imm32(0.f));
+        return;
+    }
     const IR::Attribute attrib = IR::Attribute::Param0 + attr_index;
     const auto& attr = runtime_info.fs_info.inputs[attr_index];
     auto& interp = info.fs_interpolation[attr_index];

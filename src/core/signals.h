@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <functional>
 #include <set>
 #include <signal.h>
 #include "common/singleton.h"
@@ -51,7 +52,16 @@ private:
         u32 priority;
 
         std::strong_ordering operator<=>(const HandlerEntry& right) const {
-            return priority <=> right.priority;
+            if (const auto order = priority <=> right.priority; order != 0) {
+                return order;
+            }
+            if (std::less<T>{}(handler, right.handler)) {
+                return std::strong_ordering::less;
+            }
+            if (std::less<T>{}(right.handler, handler)) {
+                return std::strong_ordering::greater;
+            }
+            return std::strong_ordering::equal;
         }
     };
     std::set<HandlerEntry<AccessViolationHandler>> access_violation_handlers;

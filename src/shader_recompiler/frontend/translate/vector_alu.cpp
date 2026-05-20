@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/logging/log.h"
 #include "shader_recompiler/frontend/opcodes.h"
 #include "shader_recompiler/frontend/translate/translate.h"
 #include "shader_recompiler/profile.h"
@@ -80,6 +81,8 @@ void Translator::EmitVectorAlu(const GcnInst& inst) {
         return V_MBCNT_U32_B32(true, inst);
     case Opcode::V_MBCNT_HI_U32_B32:
         return V_MBCNT_U32_B32(false, inst);
+    case Opcode::V_CVT_PKACCUM_U8_F32:
+        return V_CVT_PKACCUM_U8_F32(inst);
     case Opcode::V_ADD_I32:
         return V_ADD_I32(inst);
     case Opcode::V_SUB_I32:
@@ -246,6 +249,40 @@ void Translator::EmitVectorAlu(const GcnInst& inst) {
     case Opcode::V_CMP_NLT_F32:
         return V_CMP_F32(ConditionOp::GE, false, inst);
 
+        // Signaling variants are treated like their non-signaling equivalents for now. The PS4
+        // shader only needs the predicate/EXEC result here; host-side FP exception behavior is not
+        // modeled by the recompiler.
+    case Opcode::V_CMPS_F_F32:
+        return V_CMP_F32(ConditionOp::F, false, inst);
+    case Opcode::V_CMPS_LT_F32:
+        return V_CMP_F32(ConditionOp::LT, false, inst);
+    case Opcode::V_CMPS_EQ_F32:
+        return V_CMP_F32(ConditionOp::EQ, false, inst);
+    case Opcode::V_CMPS_LE_F32:
+        return V_CMP_F32(ConditionOp::LE, false, inst);
+    case Opcode::V_CMPS_GT_F32:
+        return V_CMP_F32(ConditionOp::GT, false, inst);
+    case Opcode::V_CMPS_LG_F32:
+        return V_CMP_F32(ConditionOp::LG, false, inst);
+    case Opcode::V_CMPS_GE_F32:
+        return V_CMP_F32(ConditionOp::GE, false, inst);
+    case Opcode::V_CMPS_U_F32:
+        return V_CMP_F32(ConditionOp::U, false, inst);
+    case Opcode::V_CMPS_NGE_F32:
+        return V_CMP_F32(ConditionOp::LT, false, inst);
+    case Opcode::V_CMPS_NLG_F32:
+        return V_CMP_F32(ConditionOp::EQ, false, inst);
+    case Opcode::V_CMPS_NGT_F32:
+        return V_CMP_F32(ConditionOp::LE, false, inst);
+    case Opcode::V_CMPS_NLE_F32:
+        return V_CMP_F32(ConditionOp::GT, false, inst);
+    case Opcode::V_CMPS_NEQ_F32:
+        return V_CMP_F32(ConditionOp::LG, false, inst);
+    case Opcode::V_CMPS_NLT_F32:
+        return V_CMP_F32(ConditionOp::GE, false, inst);
+    case Opcode::V_CMPS_TRU_F32:
+        return V_CMP_F32(ConditionOp::TRU, false, inst);
+
         //     V_CMPX_{OP16}_F32
     case Opcode::V_CMPX_F_F32:
         return V_CMP_F32(ConditionOp::F, true, inst);
@@ -274,6 +311,42 @@ void Translator::EmitVectorAlu(const GcnInst& inst) {
     case Opcode::V_CMPX_NLT_F32:
         return V_CMP_F32(ConditionOp::GE, true, inst);
     case Opcode::V_CMPX_TRU_F32:
+        return V_CMP_F32(ConditionOp::TRU, true, inst);
+
+        // Signaling EXEC-setting variants.
+    case Opcode::V_CMPSX_F_F32:
+        return V_CMP_F32(ConditionOp::F, true, inst);
+    case Opcode::V_CMPSX_LT_F32:
+        return V_CMP_F32(ConditionOp::LT, true, inst);
+    case Opcode::V_CMPSX_EQ_F32:
+        return V_CMP_F32(ConditionOp::EQ, true, inst);
+    case Opcode::V_CMPSX_LE_F32:
+        return V_CMP_F32(ConditionOp::LE, true, inst);
+    case Opcode::V_CMPSX_GT_F32:
+        return V_CMP_F32(ConditionOp::GT, true, inst);
+    case Opcode::V_CMPSX_LG_F32:
+        return V_CMP_F32(ConditionOp::LG, true, inst);
+    case Opcode::V_CMPSX_GE_F32:
+        return V_CMP_F32(ConditionOp::GE, true, inst);
+    case Opcode::V_CMPSX_U_F32:
+        return V_CMP_F32(ConditionOp::U, true, inst);
+    case Opcode::V_CMPSX_NGE_F32:
+        return V_CMP_F32(ConditionOp::LT, true, inst);
+    case Opcode::V_CMPSX_NLG_F32:
+        return V_CMP_F32(ConditionOp::EQ, true, inst);
+    case Opcode::V_CMPSX_NGT_F32:
+        return V_CMP_F32(ConditionOp::LE, true, inst);
+    case Opcode::V_CMPSX_NLE_F32:
+        return V_CMP_F32(ConditionOp::GT, true, inst);
+    case Opcode::S_SEXT_I32_I8:
+        // Decoder collision: in this VectorALU path opcode value 92 is V_CMPSX_NLE_F32, but the
+        // unified enum name also maps value 92 to SOP1 S_SEXT_I32_I8.
+        return V_CMP_F32(ConditionOp::GT, true, inst);
+    case Opcode::V_CMPSX_NEQ_F32:
+        return V_CMP_F32(ConditionOp::LG, true, inst);
+    case Opcode::V_CMPSX_NLT_F32:
+        return V_CMP_F32(ConditionOp::GE, true, inst);
+    case Opcode::V_CMPSX_TRU_F32:
         return V_CMP_F32(ConditionOp::TRU, true, inst);
 
         //     V_CMP_{OP16}_F64
@@ -520,6 +593,10 @@ void Translator::EmitVectorAlu(const GcnInst& inst) {
         return V_MAD_MIXLO_F16(inst);
     case Opcode::V_MAD_MIXHI_F16:
         return V_MAD_MIXHI_F16(inst);
+    case Opcode::S_BCNT1_I32_B32:
+        return S_BCNT1_I32_B32(inst);
+    case Opcode::S_BCNT1_I32_B64:
+        return S_BCNT1_I32_B64(inst);
 
     default:
         LogMissingOpcode(inst);
@@ -719,7 +796,10 @@ void Translator::V_MBCNT_U32_B32(bool is_low, const GcnInst& inst) {
              inst.src[1].field == OperandField::VectorGPR)) {
             return SetDst(inst.dst[0], GetSrc(inst.src[1]));
         }
-        UNREACHABLE();
+        LOG_WARNING(Render_Recompiler,
+                    "Unsupported v_mbcnt_hi_u32_b32 form at pc={:#x}; preserving addend",
+                    pc);
+        return SetDst(inst.dst[0], GetSrc(inst.src[1]));
     } else {
         // v_mbcnt_lo_u32_b32 vY, -1, vX
         // used combined with above to fetch lane id in non-compute stages
@@ -732,8 +812,18 @@ void Translator::V_MBCNT_U32_B32(bool is_low, const GcnInst& inst) {
             inst.src[0].field == OperandField::ScalarGPR) {
             return SetDst(inst.dst[0], GetSrc(inst.src[1]));
         }
-        UNREACHABLE();
+        LOG_WARNING(Render_Recompiler,
+                    "Unsupported v_mbcnt_lo_u32_b32 form at pc={:#x}; preserving addend",
+                    pc);
+        return SetDst(inst.dst[0], GetSrc(inst.src[1]));
     }
+}
+
+void Translator::V_CVT_PKACCUM_U8_F32(const GcnInst& inst) {
+    const IR::U32 value = ir.BitwiseAnd(ir.ConvertFToU(32, GetSrc<IR::F32>(inst.src[0])),
+                                       ir.Imm32(0xff));
+    const IR::U32 accum = ir.ShiftLeftLogical(GetSrc(inst.src[1]), ir.Imm32(8));
+    SetDst(inst.dst[0], ir.BitwiseOr(accum, value));
 }
 
 void Translator::V_ADD_I32(const GcnInst& inst) {
@@ -1186,7 +1276,14 @@ void Translator::V_CMP_F32(ConditionOp op, bool set_exec, const GcnInst& inst) {
     if (set_exec) {
         ir.SetExec(result);
     }
-    SetDst1(inst.dst[1], result);
+    // VOPC compares write VCC implicitly on GCN. Some decoded forms do not carry an explicit
+    // VCC destination operand, so preserve the architectural destination instead of failing on
+    // OperandField::Undefined.
+    if (inst.dst[1].field == OperandField::Undefined) {
+        ir.SetVcc(result);
+    } else {
+        SetDst1(inst.dst[1], result);
+    }
 }
 
 void Translator::V_CMP_F64(ConditionOp op, bool set_exec, const GcnInst& inst) {
@@ -1217,7 +1314,11 @@ void Translator::V_CMP_F64(ConditionOp op, bool set_exec, const GcnInst& inst) {
     if (set_exec) {
         ir.SetExec(result);
     }
-    SetDst1(inst.dst[1], result);
+    if (inst.dst[1].field == OperandField::Undefined) {
+        ir.SetVcc(result);
+    } else {
+        SetDst1(inst.dst[1], result);
+    }
 }
 
 void Translator::V_CMP_U32(ConditionOp op, bool is_signed, bool set_exec, const GcnInst& inst) {
@@ -1248,7 +1349,11 @@ void Translator::V_CMP_U32(ConditionOp op, bool is_signed, bool set_exec, const 
     if (set_exec) {
         ir.SetExec(result);
     }
-    SetDst1(inst.dst[1], result);
+    if (inst.dst[1].field == OperandField::Undefined) {
+        ir.SetVcc(result);
+    } else {
+        SetDst1(inst.dst[1], result);
+    }
 }
 
 void Translator::V_CMP_U64(ConditionOp op, bool is_signed, bool set_exec, const GcnInst& inst) {
@@ -1290,7 +1395,11 @@ void Translator::V_CMP_U64(ConditionOp op, bool is_signed, bool set_exec, const 
     if (set_exec) {
         UNREACHABLE_MSG("Exec setting for V_CMP_U64 is not supported");
     }
-    SetDst1(inst.dst[1], result);
+    if (inst.dst[1].field == OperandField::Undefined) {
+        ir.SetVcc(result);
+    } else {
+        SetDst1(inst.dst[1], result);
+    }
 }
 
 void Translator::V_CMP_CLASS_F32(const GcnInst& inst) {

@@ -3,8 +3,14 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cstdlib>
+
 #include "common/assert.h"
+#include "common/debug.h"
 #include "common/types.h"
+#include "shader_recompiler/frontend/decode.h"
+#include "core/memory.h"
 #include "shader_recompiler/params.h"
 
 namespace AmdGpu {
@@ -209,12 +215,18 @@ struct ComputeProgram {
     }
 };
 
-static constexpr const BinaryInfo& SearchBinaryInfo(const u32* code) {
+struct BinaryInfoSearchResult {
+    const BinaryInfo* info{};
+    const u32* binary_info_addr{};
+    bool used_fallback_scan{};
+};
+
+static inline BinaryInfoSearchResult SearchBinaryInfo(const u32* code) {
     constexpr u32 token_mov_vcchi = 0xBEEB03FF;
     if (code[0] == token_mov_vcchi) {
         const auto* info = std::bit_cast<const BinaryInfo*>(code + (code[1] + 1) * 2);
         if (info->Valid()) {
-            return *info;
+            return {.info = info, .binary_info_addr = std::bit_cast<const u32*>(info)};
         }
     }
     constexpr u32 signature_size = sizeof(BinaryInfo::signature_ref) / sizeof(u8);
@@ -222,18 +234,84 @@ static constexpr const BinaryInfo& SearchBinaryInfo(const u32* code) {
     const u32* end = code + search_limit;
     for (const u32* it = code; it < end; ++it) {
         if (const BinaryInfo* info = std::bit_cast<const BinaryInfo*>(it); info->Valid()) {
-            return *info;
+            return {.info = info, .binary_info_addr = it, .used_fallback_scan = true};
         }
     }
     UNREACHABLE_MSG("Shader binary info not found.");
 }
 
-static constexpr Shader::ShaderParams GetParams(const auto& sh) {
-    const auto* code = sh.template Address<u32*>();
-    const auto& bininfo = SearchBinaryInfo(code);
+static inline bool IsWritableDestination(Shader::Gcn::OperandField field) {
+    using Shader::Gcn::OperandField;
+    switch (field) {
+    case OperandField::Undefined:
+    case OperandField::ScalarGPR:
+    case OperandField::VectorGPR:
+    case OperandField::VccLo:
+    case OperandField::VccHi:
+    case OperandField::M0:
+    case OperandField::ExecLo:
+    case OperandField::ExecHi:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static inline bool HasInvalidFirstDestination(const u32* code) {
+    Shader::Gcn::GcnCodeSlice code_slice(code, code + 16);
+    Shader::Gcn::GcnDecodeContext decoder;
+    const auto inst = decoder.decodeInstruction(code_slice);
+    return std::ranges::any_of(inst.dst, [](const auto& dst) {
+        return !IsWritableDestination(dst.field);
+    });
+}
+
+static inline Shader::ShaderParams GetParams(const auto& sh, bool allow_prefixed_shader_body = false) {
+    const VAddr guest_address = sh.template Address<VAddr>();
+    const VAddr resolved_address = Core::Memory::Instance()->ResolveGuestAddress(guest_address);
+    auto* code = std::bit_cast<const u32*>(resolved_address);
+    auto search = SearchBinaryInfo(code);
+    u32 prefix_skip_dw = 0;
+    if (allow_prefixed_shader_body && search.used_fallback_scan && HasInvalidFirstDestination(code)) {
+        constexpr u32 candidate_skip_dw = 0x100 / sizeof(u32);
+        auto* candidate_code = code + candidate_skip_dw;
+        auto candidate_search = SearchBinaryInfo(candidate_code);
+        if (candidate_search.info->shader_hash == search.info->shader_hash &&
+            !HasInvalidFirstDestination(candidate_code)) {
+            code = candidate_code;
+            search = candidate_search;
+            prefix_skip_dw = candidate_skip_dw;
+        }
+    }
+    const auto& bininfo = *search.info;
+    const auto binary_info_offset_dw = static_cast<u32>(search.binary_info_addr - code);
+    const u32 bininfo_length_dw = bininfo.length / sizeof(u32);
+    // Some titles point at a shader body without the usual leading binary-info pointer. In that
+    // fallback case the OrbShdr marker is found by scanning ahead. Usually the marker is close and
+    // the pre-marker span is the best body size, but runaway scans can include unrelated metadata.
+    const auto code_size_dw = [&] {
+        if (!search.used_fallback_scan) {
+            return bininfo_length_dw;
+        }
+        constexpr u32 runaway_scan_multiplier = 2;
+        if (bininfo_length_dw != 0 && binary_info_offset_dw > bininfo_length_dw *
+                                                              runaway_scan_multiplier) {
+            return bininfo_length_dw;
+        }
+        return binary_info_offset_dw;
+    }();
+    if (std::getenv("SHADPS4_TRACE_SHADER_PARAMS") != nullptr) {
+        LOG_WARNING(Render_Vulkan,
+                    "Shader params guest={:#x} resolved={:#x} first=[{:#x}, {:#x}, {:#x}, {:#x}] "
+                    "bininfo_offset_dw={} length={} length_dw={} code_size_dw={} fallback={} "
+                    "prefix_skip_dw={} hash={:#x} type={}",
+                    guest_address, resolved_address, code[0], code[1], code[2], code[3],
+                    binary_info_offset_dw, bininfo.length, bininfo_length_dw, code_size_dw,
+                    search.used_fallback_scan, prefix_skip_dw, bininfo.shader_hash, bininfo.type);
+    }
     return {
         .user_data = sh.user_data,
-        .code = std::span{code, bininfo.length / sizeof(u32)},
+        .code = std::span{code, code_size_dw},
         .hash = bininfo.shader_hash,
     };
 }

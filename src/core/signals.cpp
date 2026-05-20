@@ -5,6 +5,8 @@
 #include "common/assert.h"
 #include "common/decoder.h"
 #include "common/signal_context.h"
+#include "common/singleton.h"
+#include "core/linker.h"
 #include "core/libraries/kernel/threads/exception.h"
 #include "core/memory.h"
 #include "core/signals.h"
@@ -156,6 +158,28 @@ static void TraceSignalSymbol(void* code_address) {
         ok ? info.dli_saddr : nullptr);
     if (len > 0) {
         const auto size = static_cast<size_t>(std::min(len, static_cast<int>(sizeof(buffer) - 1)));
+        write(STDERR_FILENO, buffer, size);
+    }
+
+    const auto address = reinterpret_cast<VAddr>(code_address);
+    auto* linker = Common::Singleton<Linker>::Instance();
+    const auto* module = linker ? linker->FindByAddress(address) : nullptr;
+    if (!module) {
+        return;
+    }
+
+    const VAddr module_base = module->GetBaseAddress();
+    const VAddr module_offset = address - module_base;
+    const auto module_name = module->name.empty() ? module->file.filename().string() : module->name;
+    const auto module_len = std::snprintf(
+        buffer, sizeof(buffer),
+        "TRACE_SIGNAL_MODULE rip=%p module=%s module_base=%p module_offset=%#llx size=%#llx\n",
+        code_address, module_name.c_str(), reinterpret_cast<void*>(module_base),
+        static_cast<unsigned long long>(module_offset),
+        static_cast<unsigned long long>(module->aligned_base_size));
+    if (module_len > 0) {
+        const auto size =
+            static_cast<size_t>(std::min(module_len, static_cast<int>(sizeof(buffer) - 1)));
         write(STDERR_FILENO, buffer, size);
     }
 }

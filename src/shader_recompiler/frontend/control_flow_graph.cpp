@@ -110,6 +110,7 @@ CFG::CFG(Common::ObjectPool<Block>& block_pool_, std::span<const GcnInst> inst_l
     EmitBlocks();
     LinkBlocks();
     SplitDivergenceScopes();
+    PruneUnreachableBlocks();
 }
 
 void CFG::EmitLabels() {
@@ -152,6 +153,7 @@ void CFG::EmitLabels() {
         pc += inst.length;
     }
     index_to_pc[inst_list.size()] = pc;
+    AddLabel(pc);
 
     // Sort labels to make sure block insertion is correct.
     std::ranges::sort(labels);
@@ -306,7 +308,11 @@ void CFG::EmitBlocks() {
 void CFG::LinkBlocks() {
     const auto get_block = [this](u32 address) {
         auto it = blocks.find(address, Compare{});
-        ASSERT_MSG(it != blocks.cend() && it->begin == address);
+        if (it == blocks.cend() || it->begin != address) {
+            LOG_WARNING(Render_Recompiler, "Dropping malformed CFG edge to missing block {:#x}",
+                        address);
+            return static_cast<Block*>(nullptr);
+        }
         return &*it;
     };
 
@@ -317,9 +323,17 @@ void CFG::LinkBlocks() {
         // If the block doesn't end with a branch we simply
         // need to link with the next block.
         if (!end_inst.IsTerminateInstruction()) {
+            if (block.end == index_to_pc[inst_list.size()]) {
+                block.end_class = EndClass::Exit;
+                continue;
+            }
             auto* next_block = get_block(block.end);
-            block.branch_true = next_block;
-            block.end_class = EndClass::Branch;
+            if (next_block == nullptr) {
+                block.end_class = EndClass::Exit;
+            } else {
+                block.branch_true = next_block;
+                block.end_class = EndClass::Branch;
+            }
             continue;
         }
 
@@ -340,11 +354,19 @@ void CFG::LinkBlocks() {
 
         if (end_inst.IsUnconditionalBranch()) {
             auto* target_block = get_block(target_pc);
-            block.branch_true = target_block;
-            block.end_class = EndClass::Branch;
+            if (target_block == nullptr) {
+                block.end_class = EndClass::Exit;
+            } else {
+                block.branch_true = target_block;
+                block.end_class = EndClass::Branch;
+            }
         } else if (end_inst.IsConditionalBranch()) {
             auto* target_block = get_block(target_pc);
             auto* end_block = get_block(block.end);
+            if (target_block == nullptr && end_block == nullptr) {
+                block.end_class = EndClass::Exit;
+                continue;
+            }
             block.branch_true = target_block;
             block.branch_false = end_block;
             block.end_class = EndClass::Branch;
@@ -352,6 +374,68 @@ void CFG::LinkBlocks() {
             block.end_class = EndClass::Exit;
         } else {
             UNREACHABLE();
+        }
+    }
+}
+
+void CFG::PruneUnreachableBlocks() {
+    if (blocks.empty()) {
+        return;
+    }
+
+    boost::container::small_vector<Block*, 32> reachable;
+    boost::container::small_vector<Block*, 32> pending;
+
+    const auto contains_block = [this](Block* block) {
+        if (block == nullptr) {
+            return false;
+        }
+        return std::ranges::any_of(blocks, [block](const Block& candidate) {
+            return &candidate == block;
+        });
+    };
+
+    const auto mark = [&](Block* block) {
+        if (block == nullptr) {
+            return;
+        }
+        if (!contains_block(block)) {
+            LOG_WARNING(Render_Recompiler,
+                        "Ignoring malformed CFG edge to non-owned block pointer {}",
+                        fmt::ptr(block));
+            return;
+        }
+        if (std::ranges::find(reachable, block) != reachable.end()) {
+            return;
+        }
+        reachable.push_back(block);
+        pending.push_back(block);
+    };
+
+    mark(&*blocks.begin());
+    while (!pending.empty()) {
+        Block* block = pending.back();
+        pending.pop_back();
+        if (block->end_class == EndClass::Branch) {
+            if (!contains_block(block->branch_true)) {
+                block->branch_true = nullptr;
+            }
+            if (!contains_block(block->branch_false)) {
+                block->branch_false = nullptr;
+            }
+            if (block->branch_true == nullptr && block->branch_false == nullptr) {
+                block->end_class = EndClass::Exit;
+                continue;
+            }
+            mark(block->branch_true);
+            mark(block->branch_false);
+        }
+    }
+
+    for (auto it = blocks.begin(); it != blocks.end();) {
+        auto current = it++;
+        if (std::ranges::find(reachable, &*current) == reachable.end()) {
+            blocks.erase(current);
         }
     }
 }

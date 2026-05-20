@@ -256,13 +256,13 @@ void FlattenExtendedUserdataPass(IR::Program& program) {
                     continue;
                 }
 
-                all_readconsts.push_back(&inst);
-                if (pass_info.DeduplicateInstruction(&inst) != &inst) {
-                    // This is a duplicate of a readconst we've already visited
+                IR::Inst* ptr_composite = inst.Arg(0).InstRecursive();
+                if (!ptr_composite || ptr_composite->NumArgs() < 2) {
+                    LOG_WARNING(Render_Recompiler,
+                                "ReadConst has untrackable pointer base; using dynamic const path");
+                    inst.SetFlags<u32>(0);
                     continue;
                 }
-
-                IR::Inst* ptr_composite = inst.Arg(0).InstRecursive();
 
                 const auto pred = [](IR::Inst* inst) -> std::optional<IR::Inst*> {
                     if (inst->GetOpcode() == IR::Opcode::GetUserData ||
@@ -273,7 +273,18 @@ void FlattenExtendedUserdataPass(IR::Program& program) {
                 };
                 auto base0 = IR::BreadthFirstSearch(ptr_composite->Arg(0), pred);
                 auto base1 = IR::BreadthFirstSearch(ptr_composite->Arg(1), pred);
-                ASSERT_MSG(base0 && base1, "ReadConst not from constant memory");
+                if (!base0 || !base1) {
+                    LOG_WARNING(Render_Recompiler,
+                                "ReadConst not from constant memory; using dynamic const path");
+                    inst.SetFlags<u32>(0);
+                    continue;
+                }
+
+                all_readconsts.push_back(&inst);
+                if (pass_info.DeduplicateInstruction(&inst) != &inst) {
+                    // This is a duplicate of a readconst we've already visited
+                    continue;
+                }
 
                 IR::Inst* ptr_lo = base0.value();
                 ptr_lo = pass_info.DeduplicateInstruction(ptr_lo);

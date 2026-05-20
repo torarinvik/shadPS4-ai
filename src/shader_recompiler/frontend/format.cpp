@@ -6,6 +6,14 @@
 
 namespace Shader::Gcn {
 
+template <typename Array>
+InstFormat SafeInstructionFormat(const Array& formats, u32 opcode) {
+    if (opcode >= formats.size()) {
+        return {};
+    }
+    return formats[opcode];
+}
+
 constexpr std::array<InstFormat, 45> InstructionFormatSOP2 = {{
     // 0 = S_ADD_U32
     {InstClass::ScalarArith, InstCategory::ScalarALU, 2, 1, ScalarType::Uint32, ScalarType::Uint32},
@@ -4373,39 +4381,39 @@ constexpr std::array<InstFormat, 1> InstructionFormatEXP = {{
 InstFormat InstructionFormat(InstEncoding encoding, uint32_t opcode) {
     switch (encoding) {
     case InstEncoding::SOP1:
-        return InstructionFormatSOP1[opcode];
+        return SafeInstructionFormat(InstructionFormatSOP1, opcode);
     case InstEncoding::SOPP:
-        return InstructionFormatSOPP[opcode];
+        return SafeInstructionFormat(InstructionFormatSOPP, opcode);
     case InstEncoding::SOPC:
-        return InstructionFormatSOPC[opcode];
+        return SafeInstructionFormat(InstructionFormatSOPC, opcode);
     case InstEncoding::VOP1:
-        return InstructionFormatVOP1[opcode];
+        return SafeInstructionFormat(InstructionFormatVOP1, opcode);
     case InstEncoding::VOPC:
-        return InstructionFormatVOPC[opcode];
+        return SafeInstructionFormat(InstructionFormatVOPC, opcode);
     case InstEncoding::VOP3:
-        return InstructionFormatVOP3[opcode];
+        return SafeInstructionFormat(InstructionFormatVOP3, opcode);
     case InstEncoding::VOP3P:
-        return InstructionFormatVOP3P[opcode];
+        return SafeInstructionFormat(InstructionFormatVOP3P, opcode);
     case InstEncoding::EXP:
-        return InstructionFormatEXP[opcode];
+        return SafeInstructionFormat(InstructionFormatEXP, opcode);
     case InstEncoding::VINTRP:
-        return InstructionFormatVINTRP[opcode];
+        return SafeInstructionFormat(InstructionFormatVINTRP, opcode);
     case InstEncoding::DS:
-        return InstructionFormatDS[opcode];
+        return SafeInstructionFormat(InstructionFormatDS, opcode);
     case InstEncoding::MUBUF:
-        return InstructionFormatMUBUF[opcode];
+        return SafeInstructionFormat(InstructionFormatMUBUF, opcode);
     case InstEncoding::MTBUF:
-        return InstructionFormatMTBUF[opcode];
+        return SafeInstructionFormat(InstructionFormatMTBUF, opcode);
     case InstEncoding::MIMG:
-        return InstructionFormatMIMG[opcode];
+        return SafeInstructionFormat(InstructionFormatMIMG, opcode);
     case InstEncoding::SMRD:
-        return InstructionFormatSMRD[opcode];
+        return SafeInstructionFormat(InstructionFormatSMRD, opcode);
     case InstEncoding::SOPK:
-        return InstructionFormatSOPK[opcode];
+        return SafeInstructionFormat(InstructionFormatSOPK, opcode);
     case InstEncoding::SOP2:
-        return InstructionFormatSOP2[opcode];
+        return SafeInstructionFormat(InstructionFormatSOP2, opcode);
     case InstEncoding::VOP2:
-        return InstructionFormatVOP2[opcode];
+        return SafeInstructionFormat(InstructionFormatVOP2, opcode);
     default:
         UNREACHABLE();
     }

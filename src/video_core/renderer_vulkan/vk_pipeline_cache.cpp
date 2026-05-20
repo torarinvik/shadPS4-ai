@@ -510,7 +510,7 @@ bool PipelineCache::RefreshGraphicsStages() {
             return false;
         }
 
-        const auto params = AmdGpu::GetParams(*pgm);
+        const auto params = AmdGpu::GetParams(*pgm, true);
         std::optional<Shader::Gcn::FetchShaderData> fetch_shader_;
         std::tie(infos[stage_out_idx], modules[stage_out_idx], fetch_shader_,
                  key.stage_hashes[stage_out_idx]) =

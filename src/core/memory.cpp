@@ -7,6 +7,7 @@
 #include "common/debug.h"
 #include "common/decoder.h"
 #include "common/elf_info.h"
+#include "common/signal_context.h"
 #include "core/emulator_settings.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/kernel/memory.h"
@@ -16,9 +17,11 @@
 #include "core/signals.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <limits>
+#include <optional>
 
 #if defined(__APPLE__) && defined(ARCH_X86_64)
 #include <cstring>
@@ -247,14 +250,13 @@ void MemoryManager::CopySparseMemory(VAddr virtual_addr, u8* dest, u64 size) {
 }
 
 bool MemoryManager::TryWriteBacking(void* address, const void* data, u64 size) {
-    const VAddr virtual_addr = std::bit_cast<VAddr>(address);
-    std::shared_lock lk{mutex};
-    ASSERT_MSG(IsValidMapping(virtual_addr, size), "Attempted to access invalid address {:#x}",
-               virtual_addr);
-
     if (size == 0) {
         return true;
     }
+
+    const VAddr original_addr = std::bit_cast<VAddr>(address);
+    std::shared_lock lk{mutex};
+    const VAddr virtual_addr = ResolveRelocatedAddress(original_addr);
     if (!IsValidMapping(virtual_addr, size)) {
         return false;
     }
@@ -1746,10 +1748,10 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
         return false;
     }
 
-    const auto calc_address = [&](const ZydisDecodedOperand& operand) -> VAddr {
+    const auto calc_address_at = [&](const ZydisDecodedOperand& operand, u64 rip, u8 length) -> VAddr {
         u64 address = static_cast<u64>(operand.mem.disp.value);
         if (operand.mem.base == ZYDIS_REGISTER_RIP) {
-            address += state.__rip + instruction.length;
+            address += rip + length;
         } else if (operand.mem.base != ZYDIS_REGISTER_NONE) {
             address += read_reg(operand.mem.base);
         }
@@ -1757,6 +1759,9 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
             address += read_reg(operand.mem.index) * operand.mem.scale;
         }
         return address;
+    };
+    const auto calc_address = [&](const ZydisDecodedOperand& operand) -> VAddr {
+        return calc_address_at(operand, state.__rip, instruction.length);
     };
 
     const auto register_storage = [&](ZydisRegister reg) -> u64* {
@@ -1845,6 +1850,113 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
         return operand.size / 8;
     };
 
+    const auto is_vector_register = [](ZydisRegister reg) {
+        return (reg >= ZYDIS_REGISTER_XMM0 && reg <= ZYDIS_REGISTER_XMM15) ||
+               (reg >= ZYDIS_REGISTER_YMM0 && reg <= ZYDIS_REGISTER_YMM15);
+    };
+
+    const auto same_largest_register = [](ZydisRegister lhs, ZydisRegister rhs) {
+        return ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_64, lhs) ==
+               ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_64, rhs);
+    };
+
+    const auto read_ymmh_pointer = [&](u8 index) -> const void* {
+        const auto& fpu =
+            reinterpret_cast<__darwin_mcontext_avx64*>(reinterpret_cast<ucontext_t*>(context)->uc_mcontext)->__fs;
+        switch (index) {
+        case 0:
+            return &fpu.__fpu_ymmh0;
+        case 1:
+            return &fpu.__fpu_ymmh1;
+        case 2:
+            return &fpu.__fpu_ymmh2;
+        case 3:
+            return &fpu.__fpu_ymmh3;
+        case 4:
+            return &fpu.__fpu_ymmh4;
+        case 5:
+            return &fpu.__fpu_ymmh5;
+        case 6:
+            return &fpu.__fpu_ymmh6;
+        case 7:
+            return &fpu.__fpu_ymmh7;
+        case 8:
+            return &fpu.__fpu_ymmh8;
+        case 9:
+            return &fpu.__fpu_ymmh9;
+        case 10:
+            return &fpu.__fpu_ymmh10;
+        case 11:
+            return &fpu.__fpu_ymmh11;
+        case 12:
+            return &fpu.__fpu_ymmh12;
+        case 13:
+            return &fpu.__fpu_ymmh13;
+        case 14:
+            return &fpu.__fpu_ymmh14;
+        case 15:
+            return &fpu.__fpu_ymmh15;
+        default:
+            return nullptr;
+        }
+    };
+
+    const auto read_vector_register = [&](ZydisRegister reg, std::array<u8, 32>& out,
+                                          u32 bytes) -> bool {
+        if (reg >= ZYDIS_REGISTER_XMM0 && reg <= ZYDIS_REGISTER_XMM15) {
+            if (bytes > 16) {
+                return false;
+            }
+            const auto index = static_cast<u8>(reg - ZYDIS_REGISTER_XMM0);
+            const auto* xmm = Common::GetXmmPointer(context, index);
+            if (xmm == nullptr) {
+                return false;
+            }
+            std::memcpy(out.data(), xmm, bytes);
+            return true;
+        }
+
+        if (reg >= ZYDIS_REGISTER_YMM0 && reg <= ZYDIS_REGISTER_YMM15) {
+            if (bytes > out.size()) {
+                return false;
+            }
+            const auto index = static_cast<u8>(reg - ZYDIS_REGISTER_YMM0);
+            const auto* xmm = Common::GetXmmPointer(context, index);
+            const auto* ymmh = read_ymmh_pointer(index);
+            if (xmm == nullptr || ymmh == nullptr) {
+                return false;
+            }
+            std::memcpy(out.data(), xmm, std::min<u32>(bytes, 16));
+            if (bytes > 16) {
+                std::memcpy(out.data() + 16, ymmh, bytes - 16);
+            }
+            return true;
+        }
+
+        return false;
+    };
+
+    const auto is_vector_move_mnemonic = [](ZydisMnemonic mnemonic) {
+        switch (mnemonic) {
+        case ZYDIS_MNEMONIC_MOVAPS:
+        case ZYDIS_MNEMONIC_MOVDQA:
+        case ZYDIS_MNEMONIC_MOVDQU:
+        case ZYDIS_MNEMONIC_MOVNTDQ:
+        case ZYDIS_MNEMONIC_MOVUPS:
+        case ZYDIS_MNEMONIC_VMOVAPS:
+        case ZYDIS_MNEMONIC_VMOVDQA:
+        case ZYDIS_MNEMONIC_VMOVDQU:
+        case ZYDIS_MNEMONIC_VMOVNTDQ:
+        case ZYDIS_MNEMONIC_VMOVUPS:
+            return true;
+        default:
+            return false;
+        }
+    };
+    const auto is_vector_store_mnemonic = [&]() {
+        return is_vector_move_mnemonic(instruction.mnemonic);
+    };
+
     const auto value_mask = [](u32 bytes) -> u64 {
         return bytes >= sizeof(u64) ? std::numeric_limits<u64>::max() : ((1ULL << (bytes * 8)) - 1);
     };
@@ -1917,6 +2029,506 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
             return true;
         }
         return false;
+    };
+
+    const auto emulate_relocated_vector_store = [&]() -> bool {
+        if (!is_vector_store_mnemonic() || instruction.operand_count < 2) {
+            return false;
+        }
+
+        const auto& dst = operands[0];
+        const auto& src = operands[1];
+        if (dst.type != ZYDIS_OPERAND_TYPE_MEMORY || calc_address(dst) != fault_addr ||
+            src.type != ZYDIS_OPERAND_TYPE_REGISTER || !is_vector_register(src.reg.value)) {
+            return false;
+        }
+
+        const u32 bytes = operand_byte_size(dst);
+        if (bytes == 0 || bytes > 32) {
+            return false;
+        }
+        if (ResolveRelocatedAddress(fault_addr + bytes - 1) != translated_fault_addr + bytes - 1 ||
+            !IsValidMapping(translated_fault_addr, bytes)) {
+            return false;
+        }
+
+        std::array<u8, 32> vector_data{};
+        if (!read_vector_register(src.reg.value, vector_data, bytes)) {
+            return false;
+        }
+
+        const auto emulate_vector_store_loop = [&]() -> bool {
+            struct Store {
+                s64 displacement{};
+                u32 bytes{};
+                std::array<u8, 32> data{};
+            };
+
+            const auto fail = [&](std::string_view reason) {
+                static const bool trace_failures =
+                    std::getenv("SHADPS4_TRACE_RELOC_BULK_FAILURES") != nullptr;
+                static thread_local std::array<u64, 16> logged_rips{};
+                static thread_local u32 logged_count = 0;
+                const bool already_logged =
+                    std::find(logged_rips.begin(), logged_rips.end(), state.__rip) !=
+                    logged_rips.end();
+                if (trace_failures && !already_logged && logged_count < logged_rips.size()) {
+                    logged_rips[logged_count++] = state.__rip;
+                    LOG_WARNING(Kernel_Vmm,
+                                "Relocated vector store loop matcher rejected {} at {:#x}: {}",
+                                ZydisMnemonicGetString(instruction.mnemonic), state.__rip, reason);
+                }
+                return false;
+            };
+
+            if (dst.mem.base == ZYDIS_REGISTER_NONE || dst.mem.base == ZYDIS_REGISTER_RIP ||
+                dst.mem.index != ZYDIS_REGISTER_NONE) {
+                return fail("unsupported memory operand");
+            }
+
+            std::array<Store, 8> stores{};
+            u32 store_count = 0;
+            u64 scan_rip_value = state.__rip;
+            s64 min_disp = std::numeric_limits<s64>::max();
+            s64 max_end = std::numeric_limits<s64>::min();
+
+            while (store_count < stores.size()) {
+                ZydisDecodedInstruction store_inst;
+                ZydisDecodedOperand store_ops[ZYDIS_MAX_OPERAND_COUNT];
+                auto* store_rip = reinterpret_cast<void*>(scan_rip_value);
+                if (!ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(store_inst,
+                                                                                  store_ops,
+                                                                                  store_rip)) ||
+                    store_inst.operand_count < 2 || !is_vector_move_mnemonic(store_inst.mnemonic) ||
+                    store_ops[0].type != ZYDIS_OPERAND_TYPE_MEMORY ||
+                    store_ops[1].type != ZYDIS_OPERAND_TYPE_REGISTER ||
+                    !is_vector_register(store_ops[1].reg.value) ||
+                    store_ops[0].mem.base != dst.mem.base ||
+                    store_ops[0].mem.index != ZYDIS_REGISTER_NONE) {
+                    break;
+                }
+
+                const u32 store_bytes = operand_byte_size(store_ops[0]);
+                if (store_bytes == 0 || store_bytes > stores[store_count].data.size()) {
+                    return fail("invalid store size");
+                }
+                if (!read_vector_register(store_ops[1].reg.value, stores[store_count].data,
+                                          store_bytes)) {
+                    return fail("cannot read vector source");
+                }
+
+                stores[store_count].displacement = store_ops[0].mem.disp.value;
+                stores[store_count].bytes = store_bytes;
+                min_disp = std::min(min_disp, stores[store_count].displacement);
+                max_end = std::max(max_end, stores[store_count].displacement +
+                                                static_cast<s64>(store_bytes));
+                store_count++;
+                scan_rip_value += store_inst.length;
+            }
+
+            if (store_count == 0 || min_disp >= max_end) {
+                return fail("no vector stores");
+            }
+
+            ZydisDecodedInstruction cursor_inst;
+            ZydisDecodedOperand cursor_ops[ZYDIS_MAX_OPERAND_COUNT];
+            auto* cursor_rip = reinterpret_cast<void*>(scan_rip_value);
+            if (!ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(cursor_inst,
+                                                                              cursor_ops,
+                                                                              cursor_rip)) ||
+                (cursor_inst.mnemonic != ZYDIS_MNEMONIC_ADD &&
+                 cursor_inst.mnemonic != ZYDIS_MNEMONIC_SUB) ||
+                cursor_inst.operand_count < 2 ||
+                cursor_ops[0].type != ZYDIS_OPERAND_TYPE_REGISTER ||
+                cursor_ops[1].type != ZYDIS_OPERAND_TYPE_IMMEDIATE ||
+                ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_64,
+                                                 cursor_ops[0].reg.value) !=
+                    ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_64, dst.mem.base)) {
+                return fail("missing cursor add/sub");
+            }
+
+            const u64 loop_body_bytes = static_cast<u64>(max_end - min_disp);
+            if (loop_body_bytes == 0 || cursor_ops[1].imm.value.u != loop_body_bytes) {
+                return fail("cursor step does not match store span");
+            }
+            const s64 cursor_step = cursor_inst.mnemonic == ZYDIS_MNEMONIC_SUB
+                                        ? -static_cast<s64>(loop_body_bytes)
+                                        : static_cast<s64>(loop_body_bytes);
+
+            ZydisDecodedInstruction dec_inst;
+            ZydisDecodedOperand dec_ops[ZYDIS_MAX_OPERAND_COUNT];
+            auto* dec_rip = reinterpret_cast<void*>(scan_rip_value + cursor_inst.length);
+            if (!ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(dec_inst, dec_ops,
+                                                                              dec_rip)) ||
+                dec_inst.mnemonic != ZYDIS_MNEMONIC_DEC || dec_inst.operand_count < 1 ||
+                dec_ops[0].type != ZYDIS_OPERAND_TYPE_REGISTER) {
+                return fail("missing counter dec");
+            }
+
+            ZydisDecodedInstruction branch_inst;
+            ZydisDecodedOperand branch_ops[ZYDIS_MAX_OPERAND_COUNT];
+            const auto branch_rip_value = scan_rip_value + cursor_inst.length + dec_inst.length;
+            auto* branch_rip = reinterpret_cast<void*>(branch_rip_value);
+            if (!ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(
+                    branch_inst, branch_ops, branch_rip)) ||
+                branch_inst.mnemonic != ZYDIS_MNEMONIC_JNZ || branch_inst.operand_count < 1 ||
+                branch_ops[0].type != ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+                return fail("missing loop branch");
+            }
+
+            const auto relative_branch_target =
+                branch_rip_value + branch_inst.length + branch_ops[0].imm.value.s;
+            const auto absolute_branch_target = branch_ops[0].imm.value.u;
+            const auto branch_target =
+                absolute_branch_target == relative_branch_target ? absolute_branch_target
+                                                                 : relative_branch_target;
+            if (branch_target < state.__rip || branch_target >= scan_rip_value) {
+                return fail("branch target outside vector store group");
+            }
+
+            auto* counter = register_storage(dec_ops[0].reg.value);
+            auto* cursor = register_storage(dst.mem.base);
+            if (counter == nullptr || cursor == nullptr || *counter == 0) {
+                return fail("missing loop register storage");
+            }
+
+            const u64 count = *counter;
+            if (count > std::numeric_limits<u64>::max() / loop_body_bytes) {
+                return fail("loop byte count overflow");
+            }
+
+            const auto write_store = [&](VAddr guest_addr, const Store& store) -> bool {
+                if (guest_addr > std::numeric_limits<u64>::max() - (store.bytes - 1)) {
+                    return false;
+                }
+                const VAddr translated_addr = ResolveRelocatedAddress(guest_addr);
+                if (ResolveRelocatedAddress(guest_addr + store.bytes - 1) !=
+                        translated_addr + store.bytes - 1 ||
+                    !IsValidMapping(translated_addr, store.bytes)) {
+                    return false;
+                }
+                std::memcpy(reinterpret_cast<void*>(translated_addr), store.data.data(),
+                            store.bytes);
+                return true;
+            };
+
+            const u64 initial_cursor = *cursor;
+            for (u64 iteration = 0; iteration < count; ++iteration) {
+                const s64 iteration_delta = cursor_step * static_cast<s64>(iteration);
+                const VAddr iteration_cursor = static_cast<VAddr>(initial_cursor + iteration_delta);
+                for (u32 i = 0; i < store_count; ++i) {
+                    const VAddr guest_addr =
+                        static_cast<VAddr>(iteration_cursor + stores[i].displacement);
+                    if (!write_store(guest_addr, stores[i])) {
+                        return fail("store target mapping invalid");
+                    }
+                }
+            }
+
+            *cursor = static_cast<u64>(initial_cursor + cursor_step * static_cast<s64>(count));
+            *counter = 0;
+            set_status_flag(X86ZeroFlag, true);
+            set_status_flag(X86SignFlag, false);
+            set_status_flag(X86OverflowFlag, false);
+            state.__rip = branch_rip_value + branch_inst.length;
+            LOG_TRACE(Kernel_Vmm,
+                      "Bulk-emulated relocated {} vector store loop at {:#x}: {} iterations, "
+                      "{:#x} bytes, cursor step {}",
+                      ZydisMnemonicGetString(instruction.mnemonic), state.__rip, count,
+                      count * loop_body_bytes, cursor_step);
+            return true;
+        };
+
+        if (emulate_vector_store_loop()) {
+            return true;
+        }
+
+        const auto emulate_repeated_vector_store = [&]() -> bool {
+            const auto fail = [&](std::string_view reason) {
+                static const bool trace_failures =
+                    std::getenv("SHADPS4_TRACE_RELOC_BULK_FAILURES") != nullptr;
+                static thread_local std::array<u64, 16> logged_rips{};
+                static thread_local u32 logged_count = 0;
+                const bool already_logged =
+                    std::find(logged_rips.begin(), logged_rips.end(), state.__rip) !=
+                    logged_rips.end();
+                if (trace_failures && !already_logged && logged_count < logged_rips.size()) {
+                    logged_rips[logged_count++] = state.__rip;
+                    LOG_WARNING(Kernel_Vmm,
+                                "Relocated vector bulk matcher rejected {} at {:#x}: {}",
+                                ZydisMnemonicGetString(instruction.mnemonic), state.__rip, reason);
+                }
+                return false;
+            };
+
+            if (dst.mem.base == ZYDIS_REGISTER_NONE || dst.mem.base == ZYDIS_REGISTER_RIP ||
+                dst.mem.index != ZYDIS_REGISTER_NONE || dst.mem.disp.value != 0) {
+                return fail("unsupported memory operand");
+            }
+
+            u64 loop_body_bytes = bytes;
+            u64 scan_rip_value = state.__rip + instruction.length;
+            while (true) {
+                ZydisDecodedInstruction extra_store_inst;
+                ZydisDecodedOperand extra_store_ops[ZYDIS_MAX_OPERAND_COUNT];
+                auto* extra_store_rip = reinterpret_cast<void*>(scan_rip_value);
+                if (!ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(
+                        extra_store_inst, extra_store_ops, extra_store_rip)) ||
+                    extra_store_inst.operand_count < 2 || extra_store_ops[0].type != ZYDIS_OPERAND_TYPE_MEMORY ||
+                    extra_store_ops[1].type != ZYDIS_OPERAND_TYPE_REGISTER ||
+                    extra_store_ops[1].reg.value != src.reg.value ||
+                    extra_store_ops[0].mem.base != dst.mem.base ||
+                    extra_store_ops[0].mem.index != ZYDIS_REGISTER_NONE ||
+                    extra_store_ops[0].mem.disp.value != loop_body_bytes ||
+                    operand_byte_size(extra_store_ops[0]) != bytes) {
+                    break;
+                }
+
+                switch (extra_store_inst.mnemonic) {
+                case ZYDIS_MNEMONIC_MOVAPS:
+                case ZYDIS_MNEMONIC_MOVDQA:
+                case ZYDIS_MNEMONIC_MOVDQU:
+                case ZYDIS_MNEMONIC_MOVNTDQ:
+                case ZYDIS_MNEMONIC_MOVUPS:
+                case ZYDIS_MNEMONIC_VMOVAPS:
+                case ZYDIS_MNEMONIC_VMOVDQA:
+                case ZYDIS_MNEMONIC_VMOVDQU:
+                case ZYDIS_MNEMONIC_VMOVNTDQ:
+                case ZYDIS_MNEMONIC_VMOVUPS:
+                    break;
+                default:
+                    goto end_extra_store_scan;
+                }
+
+                loop_body_bytes += bytes;
+                scan_rip_value += extra_store_inst.length;
+            }
+        end_extra_store_scan:
+
+            ZydisDecodedInstruction add_inst;
+            ZydisDecodedOperand add_ops[ZYDIS_MAX_OPERAND_COUNT];
+            auto* add_rip = reinterpret_cast<void*>(scan_rip_value);
+            if (!ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(add_inst, add_ops,
+                                                                              add_rip)) ||
+                add_inst.mnemonic != ZYDIS_MNEMONIC_ADD || add_inst.operand_count < 2 ||
+                add_ops[0].type != ZYDIS_OPERAND_TYPE_REGISTER ||
+                add_ops[1].type != ZYDIS_OPERAND_TYPE_IMMEDIATE ||
+                ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_64, add_ops[0].reg.value) !=
+                    ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_64, dst.mem.base) ||
+                add_ops[1].imm.value.u != loop_body_bytes) {
+                return fail("missing cursor add");
+            }
+
+            ZydisDecodedInstruction dec_inst;
+            ZydisDecodedOperand dec_ops[ZYDIS_MAX_OPERAND_COUNT];
+            auto* dec_rip = reinterpret_cast<void*>(scan_rip_value + add_inst.length);
+            if (!ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(dec_inst, dec_ops,
+                                                                              dec_rip)) ||
+                dec_inst.mnemonic != ZYDIS_MNEMONIC_DEC || dec_inst.operand_count < 1 ||
+                dec_ops[0].type != ZYDIS_OPERAND_TYPE_REGISTER) {
+                return fail("missing counter dec");
+            }
+
+            ZydisDecodedInstruction branch_inst;
+            ZydisDecodedOperand branch_ops[ZYDIS_MAX_OPERAND_COUNT];
+            const auto branch_rip_value = scan_rip_value + add_inst.length + dec_inst.length;
+            auto* branch_rip = reinterpret_cast<void*>(branch_rip_value);
+            if (!ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(
+                    branch_inst, branch_ops, branch_rip)) ||
+                branch_inst.mnemonic != ZYDIS_MNEMONIC_JNZ || branch_inst.operand_count < 1 ||
+                branch_ops[0].type != ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+                return fail("missing loop branch");
+            }
+
+            const auto relative_branch_target =
+                branch_rip_value + branch_inst.length + branch_ops[0].imm.value.s;
+            const auto absolute_branch_target = branch_ops[0].imm.value.u;
+            const auto branch_target =
+                absolute_branch_target == relative_branch_target ? absolute_branch_target
+                                                                 : relative_branch_target;
+            std::optional<VAddr> stable_vector_source_addr;
+            if (branch_target != state.__rip) {
+                // Compiler memset loops sometimes branch to a tiny prelude just before the store
+                // (for example, a compare/test), not directly to the vector store itself. Some
+                // optimized fill loops also reload a stable vector value from memory before each
+                // store. Bulk emulation is still safe when the prelude does not mutate the cursor,
+                // counter, memory, or an address register used by that stable vector load.
+                if (branch_target > state.__rip || state.__rip - branch_target > 32) {
+                    return fail("branch target too far from store");
+                }
+
+                u64 prelude_rip_value = branch_target;
+                while (prelude_rip_value < state.__rip) {
+                    ZydisDecodedInstruction prelude_inst;
+                    ZydisDecodedOperand prelude_ops[ZYDIS_MAX_OPERAND_COUNT];
+                    auto* prelude_rip = reinterpret_cast<void*>(prelude_rip_value);
+                    if (!ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(
+                            prelude_inst, prelude_ops, prelude_rip)) ||
+                        prelude_rip_value + prelude_inst.length > state.__rip) {
+                        return fail("invalid loop prelude");
+                    }
+
+                    for (u8 i = 0; i < prelude_inst.operand_count; ++i) {
+                        if ((prelude_ops[i].actions & ZYDIS_OPERAND_ACTION_MASK_WRITE) == 0) {
+                            continue;
+                        }
+                        if (prelude_ops[i].type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                            return fail("prelude writes memory");
+                        }
+                        if (prelude_ops[i].type != ZYDIS_OPERAND_TYPE_REGISTER) {
+                            continue;
+                        }
+                        const auto written = prelude_ops[i].reg.value;
+                        if (written == ZYDIS_REGISTER_FLAGS || written == ZYDIS_REGISTER_EFLAGS ||
+                            written == ZYDIS_REGISTER_RFLAGS) {
+                            continue;
+                        }
+                        const bool zeroes_vector_source =
+                            same_largest_register(written, src.reg.value) &&
+                            prelude_inst.operand_count >= 3 &&
+                            prelude_ops[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                            prelude_ops[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                            prelude_ops[2].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                            same_largest_register(prelude_ops[0].reg.value, src.reg.value) &&
+                            prelude_ops[1].reg.value == prelude_ops[2].reg.value &&
+                            same_largest_register(prelude_ops[1].reg.value, src.reg.value) &&
+                            (prelude_inst.mnemonic == ZYDIS_MNEMONIC_VXORPS ||
+                             prelude_inst.mnemonic == ZYDIS_MNEMONIC_VXORPD ||
+                             prelude_inst.mnemonic == ZYDIS_MNEMONIC_VPXOR ||
+                             prelude_inst.mnemonic == ZYDIS_MNEMONIC_VPXORD ||
+                             prelude_inst.mnemonic == ZYDIS_MNEMONIC_VPXORQ);
+                        if (zeroes_vector_source) {
+                            vector_data.fill(0);
+                            stable_vector_source_addr.reset();
+                            continue;
+                        }
+                        const bool loads_stable_vector_source =
+                            same_largest_register(written, src.reg.value) &&
+                            is_vector_move_mnemonic(prelude_inst.mnemonic) &&
+                            prelude_inst.operand_count >= 2 &&
+                            prelude_ops[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                            prelude_ops[1].type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                            same_largest_register(prelude_ops[0].reg.value, src.reg.value) &&
+                            operand_byte_size(prelude_ops[1]) == bytes &&
+                            prelude_ops[1].mem.base != ZYDIS_REGISTER_NONE &&
+                            prelude_ops[1].mem.base != ZYDIS_REGISTER_RIP &&
+                            prelude_ops[1].mem.index == ZYDIS_REGISTER_NONE &&
+                            !same_largest_register(prelude_ops[1].mem.base, dst.mem.base) &&
+                            !same_largest_register(prelude_ops[1].mem.base, dec_ops[0].reg.value);
+                        if (loads_stable_vector_source) {
+                            const VAddr source_addr = calc_address_at(prelude_ops[1], prelude_rip_value,
+                                                                       prelude_inst.length);
+                            if (source_addr > std::numeric_limits<u64>::max() - (bytes - 1)) {
+                                return fail("prelude source address overflow");
+                            }
+                            const VAddr translated_source_addr = ResolveRelocatedAddress(source_addr);
+                            if (ResolveRelocatedAddress(source_addr + bytes - 1) !=
+                                    translated_source_addr + bytes - 1 ||
+                                !IsValidMapping(translated_source_addr, bytes)) {
+                                return fail("prelude source mapping invalid");
+                            }
+                            std::memcpy(vector_data.data(),
+                                        reinterpret_cast<const void*>(translated_source_addr), bytes);
+                            stable_vector_source_addr = source_addr;
+                            continue;
+                        }
+                        if (same_largest_register(written, dst.mem.base) ||
+                            same_largest_register(written, dec_ops[0].reg.value) ||
+                            written == src.reg.value) {
+                            if (std::getenv("SHADPS4_TRACE_RELOC_BULK_FAILURES") != nullptr) {
+                                const auto prelude_text =
+                                    Common::Decoder::Instance()->disassembleInst(
+                                        prelude_inst, prelude_ops, prelude_rip_value);
+                                LOG_WARNING(Kernel_Vmm,
+                                            "Relocated loop prelude '{}' writes {} before {} at {:#x}",
+                                            prelude_text, ZydisRegisterGetString(written),
+                                            ZydisMnemonicGetString(instruction.mnemonic),
+                                            state.__rip);
+                            }
+                            return fail("prelude mutates loop state");
+                        }
+                    }
+
+                    prelude_rip_value += prelude_inst.length;
+                }
+            }
+
+            auto* counter = register_storage(dec_ops[0].reg.value);
+            auto* cursor = register_storage(dst.mem.base);
+            if (counter == nullptr || cursor == nullptr || *counter == 0) {
+                return fail("missing loop register storage");
+            }
+
+            const u64 count = *counter;
+            if (count > std::numeric_limits<u64>::max() / loop_body_bytes) {
+                return fail("loop byte count overflow");
+            }
+            const u64 total_bytes = count * loop_body_bytes;
+            if (fault_addr > std::numeric_limits<u64>::max() - (total_bytes - 1)) {
+                return fail("loop address overflow");
+            }
+            if (stable_vector_source_addr.has_value()) {
+                const VAddr source_addr = *stable_vector_source_addr;
+                const VAddr source_end = source_addr + bytes;
+                const VAddr write_end = fault_addr + total_bytes;
+                if (source_addr < write_end && fault_addr < source_end) {
+                    return fail("prelude source overlaps destination");
+                }
+            }
+
+            u64 write_addr = fault_addr;
+            u64 remaining = total_bytes;
+            while (remaining != 0) {
+                const auto upper = relocated_mappings.upper_bound(write_addr);
+                if (upper == relocated_mappings.begin()) {
+                    return fail("missing relocated mapping");
+                }
+                const auto& mapping = std::prev(upper)->second;
+                if (write_addr < mapping.original ||
+                    write_addr >= mapping.original + mapping.size) {
+                    return fail("write outside relocated mapping");
+                }
+
+                const u64 mapping_offset = write_addr - mapping.original;
+                const u64 chunk_bytes = std::min(remaining, mapping.size - mapping_offset);
+                const VAddr translated_chunk_addr = mapping.relocated + mapping_offset;
+                if (!IsValidMapping(translated_chunk_addr, chunk_bytes)) {
+                    return fail("translated mapping invalid");
+                }
+
+                auto* dest = reinterpret_cast<u8*>(translated_chunk_addr);
+                for (u64 offset = 0; offset < chunk_bytes; offset += bytes) {
+                    std::memcpy(dest + offset, vector_data.data(), bytes);
+                }
+                write_addr += chunk_bytes;
+                remaining -= chunk_bytes;
+            }
+
+            *cursor += total_bytes;
+            *counter = 0;
+            set_status_flag(X86ZeroFlag, true);
+            set_status_flag(X86SignFlag, false);
+            set_status_flag(X86OverflowFlag, false);
+            state.__rip = branch_rip_value + branch_inst.length;
+            LOG_TRACE(Kernel_Vmm,
+                      "Bulk-emulated relocated {} loop at {:#x}: {} stores, {:#x} bytes "
+                      "{:#x}->{:#x}",
+                      ZydisMnemonicGetString(instruction.mnemonic), state.__rip, count, total_bytes,
+                      fault_addr, translated_fault_addr);
+            return true;
+        };
+
+        if (emulate_repeated_vector_store()) {
+            return true;
+        }
+
+        std::memcpy(reinterpret_cast<void*>(translated_fault_addr), vector_data.data(), bytes);
+        state.__rip += instruction.length;
+        LOG_TRACE(Kernel_Vmm,
+                  "Emulated relocated {} vector store at {:#x} -> {:#x}, {} bytes",
+                  ZydisMnemonicGetString(instruction.mnemonic), fault_addr, translated_fault_addr,
+                  bytes);
+        return true;
     };
 
     const auto emulate_relocated_mov = [&]() -> bool {
@@ -2145,6 +2757,9 @@ bool MemoryManager::HandleRelocatedAccessFault(void* context, void* fault_addres
         const auto& operand = operands[i];
         if (operand.type != ZYDIS_OPERAND_TYPE_MEMORY || calc_address(operand) != fault_addr) {
             continue;
+        }
+        if (emulate_relocated_vector_store()) {
+            return true;
         }
         if (emulate_relocated_mov()) {
             return true;

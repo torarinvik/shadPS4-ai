@@ -217,7 +217,15 @@ struct PageManager::Impl {
         auto& impl = memory->GetAddressSpace();
         ASSERT_MSG(perms != Core::MemoryPermission::Write,
                    "Attempted to protect region as write-only which is not a valid permission");
-        impl.Protect(address, size, perms);
+        const VAddr translated_address = memory->ResolveGuestAddress(address);
+        if (size > 0 &&
+            memory->ResolveGuestAddress(address + size - 1) != translated_address + size - 1) {
+            LOG_WARNING(Render,
+                        "Skipping page protection for non-contiguous relocated range {:#x} - {:#x}.",
+                        address, address + size);
+            return;
+        }
+        impl.Protect(translated_address, size, perms);
     }
 
     static bool GuestFaultSignalHandler(void* context, void* fault_address) {

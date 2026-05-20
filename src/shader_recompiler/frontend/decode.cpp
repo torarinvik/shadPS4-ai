@@ -264,11 +264,21 @@ void GcnDecodeContext::updateInstructionMeta(InstEncoding encoding) {
     uint32_t encodingOp = mapEncodingOp(encoding, m_instruction.opcode);
     InstFormat instFormat = InstructionFormat(encoding, encodingOp);
 
-    ASSERT_MSG(instFormat.src_type != ScalarType::Undefined &&
-                   instFormat.dst_type != ScalarType::Undefined,
-               "Instruction format table incomplete for opcode {} ({}, encoding = 0x{:x})",
-               magic_enum::enum_name(m_instruction.opcode), u32(m_instruction.opcode),
-               u32(encoding));
+    if (instFormat.src_type == ScalarType::Undefined ||
+        instFormat.dst_type == ScalarType::Undefined) {
+        LOG_WARNING(Render_Recompiler,
+                    "Instruction format table incomplete for opcode {} ({}, encoding = {:#x}, "
+                    "encoding_op = {}). Marking instruction undefined.",
+                    magic_enum::enum_name(m_instruction.opcode), u32(m_instruction.opcode),
+                    u32(encoding), encodingOp);
+        m_instruction.inst_class = InstClass::Undefined;
+        m_instruction.category = InstCategory::Undefined;
+        m_instruction.encoding = encoding;
+        m_instruction.length = getEncodingLength(encoding);
+        m_instruction.src_count = 0;
+        m_instruction.dst_count = 0;
+        return;
+    }
 
     m_instruction.inst_class = instFormat.inst_class;
     m_instruction.category = instFormat.inst_category;

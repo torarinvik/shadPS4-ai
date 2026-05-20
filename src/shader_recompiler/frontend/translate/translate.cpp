@@ -370,6 +370,23 @@ T Translator::GetSrc(const InstOperand& operand) {
         }
         break;
     default:
+        if (const u32 field = std::to_underlying(operand.field);
+            field > std::to_underlying(OperandField::VccHi) &&
+            field < std::to_underlying(OperandField::M0)) {
+            LOG_WARNING(Render_Recompiler,
+                        "Unsupported special scalar operand field {} code {}; using zero",
+                        field, operand.code);
+            value = get_imm(0u);
+            break;
+        }
+        if (const u32 field = std::to_underlying(operand.field);
+            field < OperandFieldRange::VectorGPRMin) {
+            LOG_WARNING(Render_Recompiler,
+                        "Unsupported scalar/immediate operand field {} code {}; using zero",
+                        field, operand.code);
+            value = get_imm(0u);
+            break;
+        }
         UNREACHABLE_MSG("unexpected operand: {}", std::to_underlying(operand.field));
     }
 
@@ -935,7 +952,9 @@ void Translator::SetDst(const InstOperand& operand, const IR::U32F32& value) {
     case OperandField::M0:
         return ir.SetM0(result);
     default:
-        UNREACHABLE();
+        UNREACHABLE_MSG("unexpected destination operand: field={}({}) type={} code={}",
+                        magic_enum::enum_name(operand.field), std::to_underlying(operand.field),
+                        std::to_underlying(operand.type), operand.code);
     }
 }
 

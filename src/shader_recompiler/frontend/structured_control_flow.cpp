@@ -10,6 +10,7 @@
 #include <vector>
 #include <boost/intrusive/list.hpp>
 #include <fmt/format.h>
+#include "common/logging/log.h"
 #include "shader_recompiler/frontend/structured_control_flow.h"
 #include "shader_recompiler/frontend/translate/translate.h"
 #include "shader_recompiler/ir/ir_emitter.h"
@@ -359,6 +360,22 @@ private:
         Tree& root{root_stmt.children};
         std::unordered_map<Block*, Node> local_labels;
         local_labels.reserve(cfg.blocks.size());
+        const auto find_label = [&](Block* branch) -> std::optional<Node> {
+            if (!branch) {
+                return std::nullopt;
+            }
+            const auto label = local_labels.find(branch);
+            if (label == local_labels.end()) {
+                LOG_WARNING(Render_Recompiler,
+                            "Dropping structured-control-flow branch to missing block {:#x}",
+                            branch->begin);
+                return std::nullopt;
+            }
+            return label->second;
+        };
+        const auto insert_return = [&root, this](Node ip) {
+            root.insert(ip, *pool.Create(Return{}, &root_stmt));
+        };
 
         for (Block& block : cfg.blocks) {
             Statement* const label{pool.Create(Label{}, label_id, &root_stmt)};
@@ -384,21 +401,38 @@ private:
                 Statement* const always_cond{
                     pool.Create(Identity{}, IR::Condition::True, &root_stmt)};
                 if (block.cond == IR::Condition::True) {
-                    const Node true_label{local_labels.at(block.branch_true)};
-                    gotos.push_back(
-                        root.insert(ip, *pool.Create(Goto{}, always_cond, true_label, &root_stmt)));
+                    if (const auto true_label = find_label(block.branch_true)) {
+                        gotos.push_back(root.insert(
+                            ip, *pool.Create(Goto{}, always_cond, *true_label, &root_stmt)));
+                    } else {
+                        insert_return(ip);
+                    }
                 } else if (block.cond == IR::Condition::False) {
-                    const Node false_label{local_labels.at(block.branch_false)};
-                    gotos.push_back(root.insert(
-                        ip, *pool.Create(Goto{}, always_cond, false_label, &root_stmt)));
+                    if (const auto false_label = find_label(block.branch_false)) {
+                        gotos.push_back(root.insert(
+                            ip, *pool.Create(Goto{}, always_cond, *false_label, &root_stmt)));
+                    } else {
+                        insert_return(ip);
+                    }
                 } else {
-                    const Node true_label{local_labels.at(block.branch_true)};
-                    const Node false_label{local_labels.at(block.branch_false)};
+                    const auto true_label = find_label(block.branch_true);
+                    const auto false_label = find_label(block.branch_false);
                     Statement* const true_cond{pool.Create(Identity{}, block.cond, &root_stmt)};
-                    gotos.push_back(
-                        root.insert(ip, *pool.Create(Goto{}, true_cond, true_label, &root_stmt)));
-                    gotos.push_back(root.insert(
-                        ip, *pool.Create(Goto{}, always_cond, false_label, &root_stmt)));
+                    if (true_label) {
+                        gotos.push_back(root.insert(
+                            ip, *pool.Create(Goto{}, true_cond, *true_label, &root_stmt)));
+                    }
+                    if (false_label) {
+                        Statement* false_cond{always_cond};
+                        if (!true_label) {
+                            false_cond = pool.Create(Not{}, true_cond, &root_stmt);
+                        }
+                        gotos.push_back(root.insert(
+                            ip, *pool.Create(Goto{}, false_cond, *false_label, &root_stmt)));
+                    }
+                    if (!true_label || !false_label) {
+                        insert_return(ip);
+                    }
                 }
                 break;
             }
