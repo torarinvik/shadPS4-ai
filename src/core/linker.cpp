@@ -70,7 +70,10 @@ static PS4_SYSV_ABI void* RunMainEntry [[noreturn]] (EntryParams* params) {
 }
 #endif
 
-Linker::Linker() : memory{Memory::Instance()} {}
+Linker::Linker() : memory{Memory::Instance()} {
+    fallback_proc_param.size = sizeof(OrbisProcParam);
+    fallback_proc_param.sdk_version = Common::ElfInfo::FW_50;
+}
 
 Linker::~Linker() = default;
 
@@ -93,7 +96,9 @@ void Linker::Execute(const std::vector<std::string>& args) {
     bool use_extended_mem1 = true, use_extended_mem2 = true;
 
     const auto* proc_param = GetProcParam();
-    ASSERT(proc_param);
+    if (module->GetProcParam<OrbisProcParam*>() == nullptr) {
+        LOG_WARNING(Core_Linker, "EBOOT has no PT_SCE_PROCPARAM; using default process params");
+    }
 
     Core::OrbisKernelMemParam mem_param{};
     if (proc_param->size >= offsetof(OrbisProcParam, mem_param) + sizeof(OrbisKernelMemParam*)) {

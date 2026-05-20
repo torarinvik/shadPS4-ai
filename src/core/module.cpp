@@ -301,8 +301,15 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
 }
 
 void Module::LoadDynamicInfo() {
-    for (const auto* dyn = reinterpret_cast<elf_dynamic*>(m_dynamic.data()); dyn->d_tag != DT_NULL;
-         dyn++) {
+    const auto* dynamic_begin = reinterpret_cast<const elf_dynamic*>(m_dynamic.data());
+    const auto dynamic_count = m_dynamic.size() / sizeof(elf_dynamic);
+    bool found_null = false;
+    for (size_t dyn_index = 0; dyn_index < dynamic_count; dyn_index++) {
+        const auto* dyn = dynamic_begin + dyn_index;
+        if (dyn->d_tag == DT_NULL) {
+            found_null = true;
+            break;
+        }
         switch (dyn->d_tag) {
         case DT_SCE_HASH: // Offset of the hash table.
             dynamic_info.hash_table =
@@ -460,6 +467,9 @@ void Module::LoadDynamicInfo() {
         default:
             LOG_INFO(Core_Linker, "unsupported dynamic tag ..........: {:#018x}", dyn->d_tag);
         }
+    }
+    if (!found_null) {
+        LOG_WARNING(Core_Linker, "Dynamic table for {} has no DT_NULL terminator", name);
     }
     const u32 relabits_num = dynamic_info.relocation_table_size / sizeof(elf_relocation) +
                              dynamic_info.jmp_relocation_table_size / sizeof(elf_relocation);

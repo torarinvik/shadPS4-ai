@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm> // std::max, std::min
+#include <cerrno>
+#include <limits>
 #include <magic_enum/magic_enum.hpp>
 #include "core/libraries/avplayer/avplayer_file_streamer.h"
 
@@ -29,6 +31,10 @@ AvPlayerFileStreamer::~AvPlayerFileStreamer() {
 }
 
 bool AvPlayerFileStreamer::Init(std::string_view path) {
+    if (m_file_replacement.open == nullptr || m_file_replacement.close == nullptr ||
+        m_file_replacement.read_offset == nullptr || m_file_replacement.size == nullptr) {
+        return false;
+    }
     const auto ptr = m_file_replacement.object_ptr;
     m_fd = m_file_replacement.open(ptr, path.data());
     if (m_fd < 0) {
@@ -49,11 +55,15 @@ void AvPlayerFileStreamer::Reset() {
 
 s32 AvPlayerFileStreamer::ReadPacket(void* opaque, u8* buffer, s32 size) {
     const auto self = reinterpret_cast<AvPlayerFileStreamer*>(opaque);
+    if (self == nullptr || buffer == nullptr || size < 0) {
+        return AVERROR(EINVAL);
+    }
     if (self->m_position >= self->m_file_size) {
         return AVERROR_EOF;
     }
-    if (self->m_position + size > self->m_file_size) {
-        size = self->m_file_size - self->m_position;
+    const auto remaining = self->m_file_size - self->m_position;
+    if (static_cast<u64>(size) > remaining) {
+        size = static_cast<s32>(std::min<u64>(remaining, std::numeric_limits<s32>::max()));
     }
     const auto read_offset = self->m_file_replacement.read_offset;
     const auto ptr = self->m_file_replacement.object_ptr;

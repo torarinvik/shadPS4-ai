@@ -51,6 +51,9 @@ using FactoryDevice = std::function<std::shared_ptr<D::BaseDevice>(u32, const ch
         return Common::Singleton<Core::FileSys::HandleTable>::Instance()->GetFile(fd)->device;     \
     }
 
+#define CREATE_DEVICE(Type)                                                                        \
+    [](u32 handle, const char*, int, u16) { return std::make_shared<Type>(handle); }
+
 // prefix path, only dev devices
 static std::map<std::string, FactoryDevice> available_device = {
     // clang-format off
@@ -66,7 +69,7 @@ static std::map<std::string, FactoryDevice> available_device = {
     {"/dev/deci_stdout", GET_DEVICE_FD(1)},
     {"/dev/deci_stderr", GET_DEVICE_FD(2)},
 
-    {"/dev/null", GET_DEVICE_FD(0)}, // fd0 (stdin) is a nop device
+    {"/dev/null", CREATE_DEVICE(D::NopDevice)},
 
     {"/dev/urandom",  &D::URandomDevice::Create },
     {"/dev/random",   &D::RandomDevice::Create },
@@ -108,6 +111,10 @@ static bool ShouldTracePathIo(const Core::FileSys::File* file) {
 }
 
 s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
+    if (raw_path == nullptr) {
+        *__Error() = POSIX_EFAULT;
+        return -1;
+    }
     LOG_INFO(Kernel_Fs, "path = {} flags = {:#x} mode = {:#o}", raw_path, flags, mode);
 
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
@@ -489,6 +496,15 @@ s64 ReadFile(Common::FS::IOFile& file, void* buf, u64 nbytes) {
 }
 
 s64 PS4_SYSV_ABI readv(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
+    if (iovcnt < 0) {
+        *__Error() = POSIX_EINVAL;
+        return -1;
+    }
+    if (iov == nullptr && iovcnt > 0) {
+        *__Error() = POSIX_EFAULT;
+        return -1;
+    }
+
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* file = h->GetFile(fd);
     if (file == nullptr) {
@@ -523,7 +539,14 @@ s64 PS4_SYSV_ABI readv(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
     u64 requested_read = 0;
     for (s32 i = 0; i < iovcnt; i++) {
         requested_read += iov[i].iov_len;
-        total_read += ReadFile(file->f, iov[i].iov_base, iov[i].iov_len);
+        const s64 result = ReadFile(file->f, iov[i].iov_base, iov[i].iov_len);
+        if (result < 0) {
+            return total_read > 0 ? total_read : -1;
+        }
+        total_read += result;
+        if (static_cast<u64>(result) != iov[i].iov_len) {
+            break;
+        }
     }
     if (ShouldTracePakIo(file)) {
         LOG_INFO(Kernel_Fs, "pak readv: fd={} path={} pos={} iovcnt={} requested={} bytes={}", fd,
@@ -546,6 +569,15 @@ s64 PS4_SYSV_ABI sceKernelReadv(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt)
 }
 
 s64 PS4_SYSV_ABI writev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
+    if (iovcnt < 0) {
+        *__Error() = POSIX_EINVAL;
+        return -1;
+    }
+    if (iov == nullptr && iovcnt > 0) {
+        *__Error() = POSIX_EFAULT;
+        return -1;
+    }
+
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* file = h->GetFile(fd);
     if (file == nullptr) {
@@ -569,7 +601,11 @@ s64 PS4_SYSV_ABI writev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt) {
 
     s64 total_written = 0;
     for (s32 i = 0; i < iovcnt; i++) {
-        total_written += file->f.WriteRaw<u8>(iov[i].iov_base, iov[i].iov_len);
+        const auto written = file->f.WriteRaw<u8>(iov[i].iov_base, iov[i].iov_len);
+        total_written += written;
+        if (written != iov[i].iov_len) {
+            break;
+        }
     }
     return total_written;
 }
@@ -762,11 +798,11 @@ s64 PS4_SYSV_ABI sceKernelRead(s32 fd, void* buf, u64 nbytes) {
 }
 
 s32 PS4_SYSV_ABI posix_mkdir(const char* path, u16 mode) {
-    LOG_INFO(Kernel_Fs, "path = {} mode = {:#o}", path, mode);
     if (path == nullptr) {
-        *__Error() = POSIX_ENOTDIR;
+        *__Error() = POSIX_EFAULT;
         return -1;
     }
+    LOG_INFO(Kernel_Fs, "path = {} mode = {:#o}", path, mode);
     if (strlen(path) > 255) {
         *__Error() = POSIX_ENAMETOOLONG;
         return -1;
@@ -810,6 +846,10 @@ s32 PS4_SYSV_ABI sceKernelMkdir(const char* path, u16 mode) {
 }
 
 s32 PS4_SYSV_ABI posix_rmdir(const char* path) {
+    if (path == nullptr) {
+        *__Error() = POSIX_EFAULT;
+        return -1;
+    }
     if (strlen(path) > 255) {
         *__Error() = POSIX_ENAMETOOLONG;
         return -1;
@@ -969,6 +1009,10 @@ s32 PS4_SYSV_ABI sceKernelUtimes(const char* path, const OrbisKernelTimeval* tim
 }
 
 s32 PS4_SYSV_ABI posix_stat(const char* path, OrbisKernelStat* sb) {
+    if (path == nullptr || sb == nullptr) {
+        *__Error() = POSIX_EFAULT;
+        return -1;
+    }
     LOG_DEBUG(Kernel_Fs, "(PARTIAL) path = {}", path);
     if (strlen(path) > 255) {
         *__Error() = POSIX_ENAMETOOLONG;
@@ -1022,6 +1066,9 @@ s32 PS4_SYSV_ABI sceKernelStat(const char* path, OrbisKernelStat* sb) {
 }
 
 s32 PS4_SYSV_ABI sceKernelCheckReachability(const char* path) {
+    if (path == nullptr) {
+        return ORBIS_KERNEL_ERROR_EFAULT;
+    }
     if (strlen(path) > 255) {
         return ORBIS_KERNEL_ERROR_ENAMETOOLONG;
     }
@@ -1169,9 +1216,12 @@ s32 PS4_SYSV_ABI sceKernelFtruncate(s32 fd, s64 length) {
 }
 
 s32 PS4_SYSV_ABI posix_rename(const char* from, const char* to) {
+    if (from == nullptr || to == nullptr) {
+        *__Error() = POSIX_EFAULT;
+        return -1;
+    }
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
     bool ro = false;
-    const auto src_path = mnt->GetHostPath(from, &ro);
     if (strlen(from) > 255) {
         *__Error() = POSIX_ENAMETOOLONG;
         return -1;
@@ -1180,6 +1230,7 @@ s32 PS4_SYSV_ABI posix_rename(const char* from, const char* to) {
         *__Error() = POSIX_ENAMETOOLONG;
         return -1;
     }
+    const auto src_path = mnt->GetHostPath(from, &ro);
     if (!fs::exists(src_path)) {
         *__Error() = POSIX_ENOENT;
         return -1;
@@ -1238,6 +1289,14 @@ s32 PS4_SYSV_ABI sceKernelRename(const char* from, const char* to) {
 }
 
 s64 PS4_SYSV_ABI posix_preadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 offset) {
+    if (iovcnt < 0) {
+        *__Error() = POSIX_EINVAL;
+        return -1;
+    }
+    if (iov == nullptr && iovcnt > 0) {
+        *__Error() = POSIX_EFAULT;
+        return -1;
+    }
     if (offset < 0) {
         *__Error() = POSIX_EINVAL;
         return -1;
@@ -1350,7 +1409,14 @@ s64 PS4_SYSV_ABI posix_preadv(s32 fd, OrbisKernelIovec* iov, s32 iovcnt, s64 off
     u64 requested_read = 0;
     for (s32 i = 0; i < iovcnt; i++) {
         requested_read += iov[i].iov_len;
-        total_read += ReadFile(file->f, iov[i].iov_base, iov[i].iov_len);
+        const s64 result = ReadFile(file->f, iov[i].iov_base, iov[i].iov_len);
+        if (result < 0) {
+            return total_read > 0 ? total_read : -1;
+        }
+        total_read += result;
+        if (static_cast<u64>(result) != iov[i].iov_len) {
+            break;
+        }
     }
     if (ShouldTracePakIo(file)) {
         LOG_INFO(Kernel_Fs, "pak preadv: fd={} path={} offset={} iovcnt={} requested={} bytes={}", fd,
@@ -1488,6 +1554,14 @@ s64 PS4_SYSV_ABI sceKernelGetdirentries(s32 fd, char* buf, u64 nbytes, s64* base
 }
 
 s64 PS4_SYSV_ABI posix_pwritev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt, s64 offset) {
+    if (iovcnt < 0) {
+        *__Error() = POSIX_EINVAL;
+        return -1;
+    }
+    if (iov == nullptr && iovcnt > 0) {
+        *__Error() = POSIX_EFAULT;
+        return -1;
+    }
     if (offset < 0) {
         *__Error() = POSIX_EINVAL;
         return -1;
@@ -1524,7 +1598,11 @@ s64 PS4_SYSV_ABI posix_pwritev(s32 fd, const OrbisKernelIovec* iov, s32 iovcnt, 
     }
     s64 total_written = 0;
     for (s32 i = 0; i < iovcnt; i++) {
-        total_written += file->f.WriteRaw<u8>(iov[i].iov_base, iov[i].iov_len);
+        const auto written = file->f.WriteRaw<u8>(iov[i].iov_base, iov[i].iov_len);
+        total_written += written;
+        if (written != iov[i].iov_len) {
+            break;
+        }
     }
     return total_written;
 }

@@ -47,13 +47,17 @@ void PngDecWarning(png_structp png_ptr, png_const_charp error_message) {
 
 s32 PS4_SYSV_ABI scePngDecCreate(const OrbisPngDecCreateParam* param, void* memoryAddress,
                                  u32 memorySize, OrbisPngDecHandle* handle) {
-    if (param == nullptr || param->attribute > 1) {
+    if (param == nullptr || handle == nullptr || param->attribute > 1) {
         LOG_ERROR(Lib_Png, "Invalid param!");
         return ORBIS_PNG_DEC_ERROR_INVALID_PARAM;
     }
     if (memoryAddress == nullptr) {
         LOG_ERROR(Lib_Png, "Invalid memory address!");
         return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
+    }
+    if (memorySize < sizeof(PngHandler)) {
+        LOG_ERROR(Lib_Png, "Invalid memory size! size = {}", memorySize);
+        return ORBIS_PNG_DEC_ERROR_INVALID_SIZE;
     }
     if (param->max_image_width - 1 > 1000000) {
         LOG_ERROR(Lib_Png, "Invalid size! width = {}", param->max_image_width);
@@ -109,9 +113,18 @@ s32 PS4_SYSV_ABI scePngDecDecode(OrbisPngDecHandle handle, const OrbisPngDecDeco
                         if (len == 0)
                             return;
                         auto pngdata = (PngStruct*)png_get_io_ptr(ps);
+                        if (pngdata->offset > pngdata->size || len > pngdata->size - pngdata->offset) {
+                            png_error(ps, "PNG input read exceeds source buffer");
+                            return;
+                        }
                         ::memcpy(data, pngdata->data + pngdata->offset, len);
                         pngdata->offset += len;
                     });
+
+    if (setjmp(png_jmpbuf(pngh->png_ptr))) {
+        LOG_ERROR(Lib_Png, "PNG decode failed");
+        return ORBIS_PNG_DEC_ERROR_INVALID_DATA;
+    }
 
     png_read_info(pngh->png_ptr, pngh->info_ptr);
     const u32 width = png_get_image_width(pngh->png_ptr, pngh->info_ptr);
@@ -161,9 +174,12 @@ s32 PS4_SYSV_ABI scePngDecDecode(OrbisPngDecHandle handle, const OrbisPngDecDeco
     const s32 pass = png_set_interlace_handling(pngh->png_ptr);
     png_read_update_info(pngh->png_ptr, pngh->info_ptr);
 
-    const s32 num_channels = png_get_channels(pngh->png_ptr, pngh->info_ptr);
-    const s32 horizontal_bytes = num_channels * width;
-    const s32 stride = param->image_pitch > 0 ? param->image_pitch : horizontal_bytes;
+    const auto rowbytes = png_get_rowbytes(pngh->png_ptr, pngh->info_ptr);
+    const u64 stride = param->image_pitch > 0 ? param->image_pitch : rowbytes;
+    if (stride < rowbytes || (height > 0 && stride > (param->image_mem_size / height))) {
+        LOG_ERROR(Lib_Png, "Output buffer too small for PNG decode");
+        return ORBIS_PNG_DEC_ERROR_INVALID_SIZE;
+    }
 
     for (int j = 0; j < pass; j++) {
         auto ptr = reinterpret_cast<png_bytep>(param->image_mem_addr);
@@ -182,16 +198,23 @@ s32 PS4_SYSV_ABI scePngDecDecodeWithInputControl() {
 }
 
 s32 PS4_SYSV_ABI scePngDecDelete(OrbisPngDecHandle handle) {
-    auto pngh = *(PngHandler**)handle;
+    if (handle == nullptr) {
+        return ORBIS_PNG_DEC_ERROR_INVALID_HANDLE;
+    }
+    auto pngh = static_cast<PngHandler*>(handle);
     png_destroy_read_struct(&pngh->png_ptr, &pngh->info_ptr, nullptr);
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI scePngDecParseHeader(const OrbisPngDecParseParam* param,
                                       OrbisPngDecImageInfo* imageInfo) {
-    if (param == nullptr) {
+    if (param == nullptr || imageInfo == nullptr) {
         LOG_ERROR(Lib_Png, "Invalid param!");
         return ORBIS_PNG_DEC_ERROR_INVALID_PARAM;
+    }
+    if (param->png_mem_addr == nullptr || param->png_mem_size < 8) {
+        LOG_ERROR(Lib_Png, "Invalid PNG data");
+        return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
     }
 
     u8 header[8];
@@ -204,9 +227,16 @@ s32 PS4_SYSV_ABI scePngDecParseHeader(const OrbisPngDecParseParam* param,
     // Create a libpng structure, also pass our custom error/warning functions
     auto png_ptr =
         png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, PngDecError, PngDecWarning);
+    if (png_ptr == nullptr) {
+        return ORBIS_PNG_DEC_ERROR_FATAL;
+    }
 
     // Create a libpng info structure
     auto info_ptr = png_create_info_struct(png_ptr);
+    if (info_ptr == nullptr) {
+        png_destroy_read_struct(&png_ptr, &info_ptr, nullptr);
+        return ORBIS_PNG_DEC_ERROR_FATAL;
+    }
 
     const auto pngdata = PngStruct{
         .data = param->png_mem_addr,
@@ -216,9 +246,19 @@ s32 PS4_SYSV_ABI scePngDecParseHeader(const OrbisPngDecParseParam* param,
 
     png_set_read_fn(png_ptr, (void*)&pngdata, [](png_structp ps, png_bytep data, png_size_t len) {
         auto pngdata = (PngStruct*)png_get_io_ptr(ps);
+        if (pngdata->offset > pngdata->size || len > pngdata->size - pngdata->offset) {
+            png_error(ps, "PNG input read exceeds source buffer");
+            return;
+        }
         ::memcpy(data, pngdata->data + pngdata->offset, len);
         pngdata->offset += len;
     });
+
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        png_destroy_read_struct(&png_ptr, &info_ptr, nullptr);
+        LOG_ERROR(Lib_Png, "PNG header parse failed");
+        return ORBIS_PNG_DEC_ERROR_INVALID_DATA;
+    }
 
     // Now call png_read_info with our pngPtr as image handle, and infoPtr to receive the file
     // info.

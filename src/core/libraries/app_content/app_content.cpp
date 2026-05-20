@@ -291,13 +291,18 @@ int PS4_SYSV_ABI sceAppContentInitialize(const OrbisAppContentInitParam* initPar
 
     LOG_WARNING(Lib_AppContent, "(DUMMY) called");
     is_initialized = true;
+    addcont_count = 0;
     auto* param_sfo = Common::Singleton<PSF>::Instance();
 
     const auto addons_dir = EmulatorSettings.GetAddonInstallDir();
     if (const auto value = param_sfo->GetString("TITLE_ID"); value.has_value()) {
         title_id = *value;
     } else {
-        UNREACHABLE_MSG("Failed to get TITLE_ID");
+        title_id = Common::ElfInfo::Instance().GameSerial();
+        if (title_id.empty()) {
+            LOG_ERROR(Lib_AppContent, "Cannot initialize app content without TITLE_ID");
+            return ORBIS_APP_CONTENT_ERROR_PARAMETER;
+        }
     }
     const auto addon_path = addons_dir / title_id;
     if (!std::filesystem::exists(addon_path)) {
@@ -315,13 +320,17 @@ int PS4_SYSV_ABI sceAppContentInitialize(const OrbisAppContentInitParam* initPar
             }
 
             // Open the param.sfo, make sure it's actually for additional content.
-            PSF* dlc_params = new PSF();
-            dlc_params->Open(param_sfo_path);
+            PSF dlc_params;
+            if (!dlc_params.Open(param_sfo_path)) {
+                LOG_WARNING(Lib_AppContent, "Failed to open additonal content {} param.sfo",
+                            entry.path().filename().string());
+                continue;
+            }
 
-            auto category = dlc_params->GetString("CATEGORY");
+            auto category = dlc_params.GetString("CATEGORY");
             if (category.has_value() && strncmp(category.value().data(), "ac", 2) == 0) {
                 // We've located additional content. Find the entitlement id from the content id.
-                auto content_id = dlc_params->GetString("CONTENT_ID");
+                auto content_id = dlc_params.GetString("CONTENT_ID");
                 if (!content_id.has_value()) {
                     LOG_WARNING(Lib_AppContent,
                                 "Additonal content {} param.sfo is missing CONTENT_ID",
@@ -339,10 +348,21 @@ int PS4_SYSV_ABI sceAppContentInitialize(const OrbisAppContentInitParam* initPar
                 }
                 auto entitlement_id =
                     content_id.value().substr(ORBIS_APP_CONTENT_ENTITLEMENT_LABEL_OFFSET);
+                if (entitlement_id.length() >= ORBIS_NP_UNIFIED_ENTITLEMENT_LABEL_SIZE) {
+                    LOG_WARNING(Lib_AppContent,
+                                "Additonal content {} entitlement label is too long",
+                                entry.path().filename().string());
+                    continue;
+                }
+                if (addcont_count >= addcont_info.size()) {
+                    LOG_WARNING(Lib_AppContent, "Too many additional content entries");
+                    break;
+                }
                 LOG_INFO(Lib_AppContent, "Entitlement {} found", entitlement_id);
 
                 // Save the additional content info in addcont_info.
                 auto& info = addcont_info[addcont_count++];
+                std::memset(info.entitlement_label, 0, sizeof(info.entitlement_label));
                 entitlement_id.copy(info.entitlement_label, entitlement_id.length());
                 info.status = OrbisAppContentAddcontDownloadStatus::Installed;
             } else {

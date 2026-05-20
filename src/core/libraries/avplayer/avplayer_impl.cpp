@@ -113,7 +113,7 @@ s32 AvPlayer::AddSourceEx(std::string_view path, AvPlayerSourceType source_type)
         LOG_ERROR(Lib_AvPlayer, "HTTP Live Streaming is not implemented");
         return ORBIS_AVPLAYER_ERROR_NOT_SUPPORTED;
     }
-    if (!m_state->AddSource(path, GetSourceType(path))) {
+    if (!m_state->AddSource(path, source_type)) {
         return ORBIS_AVPLAYER_ERROR_OPERATION_FAILED;
     }
     return ORBIS_OK;

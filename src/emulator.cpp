@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <charconv>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -117,7 +118,8 @@ s32 ReadCompiledSdkVersion(const std::filesystem::path& file) {
 
     if (i_procparam != elf_pheader.end()) {
         Core::OrbisProcParam param{};
-        elf.LoadSegment(u64(&param), i_procparam->p_offset, i_procparam->p_filesz);
+        const u64 read_size = std::min<u64>(i_procparam->p_filesz, sizeof(param));
+        elf.LoadSegment(u64(&param), i_procparam->p_offset, read_size);
         return param.sdk_version;
     }
     return 0;
@@ -164,11 +166,11 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     const auto param_sfo_exists = std::filesystem::exists(param_sfo_path);
 
     // Load param.sfo details if it exists
-    std::string id;
-    std::string title;
-    std::string app_version;
-    u32 sdk_version;
-    u32 fw_version;
+    std::string id = "UNKNOWN";
+    std::string title = "Unknown title";
+    std::string app_version = "Unknown version";
+    u32 fw_version = 0x4700000;
+    u32 sdk_version = fw_version;
     Common::PSFAttributes psf_attributes{};
     if (param_sfo_exists) {
         auto* param_sfo = Common::Singleton<PSF>::Instance();
@@ -176,9 +178,9 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
         const auto content_id = param_sfo->GetString("CONTENT_ID");
         const auto title_id = param_sfo->GetString("TITLE_ID");
-        if (content_id.has_value() && !content_id->empty()) {
+        if (content_id.has_value() && content_id->size() >= 16) {
             id = std::string(*content_id, 7, 9);
-        } else if (title_id.has_value()) {
+        } else if (title_id.has_value() && !title_id->empty()) {
             id = *title_id;
         }
         title = param_sfo->GetString("TITLE").value_or("Unknown title");
@@ -206,9 +208,12 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
                 sdk_ver_len = pubtool_info.size();
             }
             sdk_ver_len -= sdk_ver_offset;
-            std::string sdk_ver_string = pubtool_info.substr(sdk_ver_offset, sdk_ver_len).data();
-            // Number is stored in base 16.
-            sdk_version = std::stoi(sdk_ver_string, nullptr, 16);
+            const auto sdk_ver_string = pubtool_info.substr(sdk_ver_offset, sdk_ver_len);
+            u32 parsed_sdk_version = fw_version;
+            const auto* begin = sdk_ver_string.data();
+            const auto* end = begin + sdk_ver_string.size();
+            const auto [ptr, ec] = std::from_chars(begin, end, parsed_sdk_version, 16);
+            sdk_version = ec == std::errc{} && ptr != begin ? parsed_sdk_version : fw_version;
         }
     }
     const auto host_safe_id = SafeGameIdForHostPath(id);
@@ -262,7 +267,13 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
                             })) {
                             continue;
                         }
-                        int trophy_index = std::stoi(numStr);
+                        int trophy_index{};
+                        const auto* begin = numStr.data();
+                        const auto* end = begin + numStr.size();
+                        const auto [ptr, ec] = std::from_chars(begin, end, trophy_index);
+                        if (ec != std::errc{} || ptr != end) {
+                            continue;
+                        }
                         trophyFiles.emplace_back(trophy_index, filename);
                     }
                 }

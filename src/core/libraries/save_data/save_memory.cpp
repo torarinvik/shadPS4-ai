@@ -5,6 +5,7 @@
 
 #include <condition_variable>
 #include <filesystem>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -194,6 +195,9 @@ void SaveSFO(u32 slot_id) {
 }
 
 void ReadMemory(u32 slot_id, void* buf, size_t buf_size, int64_t offset) {
+    if (buf == nullptr || offset < 0) {
+        return;
+    }
     std::lock_guard lk{g_slot_mtx};
     auto& data = g_attached_slots[slot_id];
     auto& memory = data.memory_cache;
@@ -205,21 +209,30 @@ void ReadMemory(u32 slot_id, void* buf, size_t buf_size, int64_t offset) {
             f.ReadSpan(std::span{memory});
         }
     }
-    s64 read_size = buf_size;
-    if (read_size + offset > memory.size()) {
-        read_size = memory.size() - offset;
+    const auto read_offset = static_cast<size_t>(offset);
+    if (read_offset >= memory.size()) {
+        return;
     }
-    std::memcpy(buf, memory.data() + offset, read_size);
+    const auto read_size = std::min(buf_size, memory.size() - read_offset);
+    std::memcpy(buf, memory.data() + read_offset, read_size);
 }
 
 void WriteMemory(u32 slot_id, void* buf, size_t buf_size, int64_t offset) {
+    if (buf == nullptr || offset < 0) {
+        return;
+    }
     std::lock_guard lk{g_slot_mtx};
     auto& data = g_attached_slots[slot_id];
     auto& memory = data.memory_cache;
-    if (offset + buf_size > memory.size()) {
-        memory.resize(offset + buf_size);
+    const auto write_offset = static_cast<size_t>(offset);
+    if (buf_size > std::numeric_limits<size_t>::max() - write_offset) {
+        return;
     }
-    std::memcpy(memory.data() + offset, buf, buf_size);
+    const auto write_end = write_offset + buf_size;
+    if (write_end > memory.size()) {
+        memory.resize(write_end);
+    }
+    std::memcpy(memory.data() + write_offset, buf, buf_size);
     PersistMemory(slot_id, false);
     Backup::NewRequest(data.user_id, data.game_serial, GetSaveDir(slot_id),
                        Backup::OrbisSaveDataEventType::__DO_NOT_SAVE);

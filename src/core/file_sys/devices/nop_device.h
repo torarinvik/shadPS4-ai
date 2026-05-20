@@ -6,7 +6,7 @@
 
 namespace Core::Devices {
 
-class NopDevice final : BaseDevice {
+class NopDevice final : public BaseDevice {
     u32 handle;
 
 public:

@@ -75,14 +75,22 @@ void* PS4_SYSV_ABI sceKernelGetProcParam() {
 
 s32 PS4_SYSV_ABI sceKernelLoadStartModule(const char* moduleFileName, u64 args, const void* argp,
                                           u32 flags, const void* pOpt, s32* pRes) {
+    if (moduleFileName == nullptr) {
+        return ORBIS_KERNEL_ERROR_EFAULT;
+    }
     LOG_INFO(Lib_Kernel, "called filename = {}, args = {}", moduleFileName, args);
-    ASSERT(flags == 0);
+    if (flags != 0) {
+        LOG_WARNING(Lib_Kernel, "Unsupported sceKernelLoadStartModule flags {:#x}", flags);
+    }
 
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
     auto* linker = Common::Singleton<Core::Linker>::Instance();
 
     std::filesystem::path path;
     std::string guest_path(moduleFileName);
+    if (guest_path.empty()) {
+        return ORBIS_KERNEL_ERROR_EINVAL;
+    }
 
     s32 handle = -1;
 

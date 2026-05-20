@@ -78,7 +78,8 @@ public:
     }
 
     OrbisProcParam* GetProcParam() const {
-        return m_modules[0]->GetProcParam<OrbisProcParam*>();
+        auto* proc_param = m_modules[0]->GetProcParam<OrbisProcParam*>();
+        return proc_param != nullptr ? proc_param : &fallback_proc_param;
     }
 
     Module* GetModule(s32 index) const {
@@ -164,6 +165,7 @@ private:
     u32 max_tls_index{};
     u32 num_static_modules{};
     AppHeapAPI heap_api{};
+    mutable OrbisProcParam fallback_proc_param{};
     std::vector<std::unique_ptr<Module>> m_modules;
     Loader::SymbolsResolver m_hle_symbols{};
 };

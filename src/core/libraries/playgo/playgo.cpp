@@ -237,6 +237,9 @@ int scePlayGoConvertLanguage(int systemLang) {
 }
 
 s32 PS4_SYSV_ABI scePlayGoInitialize(OrbisPlayGoInitParams* param) {
+    if (param == nullptr) {
+        return ORBIS_PLAYGO_ERROR_BAD_POINTER;
+    }
     LOG_INFO(Lib_PlayGo, "called, bufSize = {}", param->bufSize);
     if (param->bufAddr == nullptr) {
         return ORBIS_PLAYGO_ERROR_BAD_POINTER;

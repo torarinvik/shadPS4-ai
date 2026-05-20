@@ -10,15 +10,28 @@
 namespace Libraries::DiscMap {
 
 int PS4_SYSV_ABI sceDiscMapGetPackageSize(s64 fflags, int* ret1, int* ret2) {
-    return ORBIS_DISC_MAP_ERROR_NO_BITMAP_INFO;
+    if (ret1 == nullptr || ret2 == nullptr) {
+        return ORBIS_DISC_MAP_ERROR_INVALID_ARGUMENT;
+    }
+    *ret1 = 0;
+    *ret2 = 0;
+    return ORBIS_OK;
 }
 
 int PS4_SYSV_ABI sceDiscMapIsRequestOnHDD(char* path, s64 offset, s64 nbytes, int* ret) {
-    return ORBIS_DISC_MAP_ERROR_NO_BITMAP_INFO;
+    if (path == nullptr || ret == nullptr || offset < 0 || nbytes < 0) {
+        return ORBIS_DISC_MAP_ERROR_INVALID_ARGUMENT;
+    }
+    *ret = 1;
+    return ORBIS_OK;
 }
 
 int PS4_SYSV_ABI Func_7C980FFB0AA27E7A(char* path, s64 offset, s64 nbytes, int* flags, int* ret1,
                                        int* ret2) {
+    if (path == nullptr || flags == nullptr || ret1 == nullptr || ret2 == nullptr || offset < 0 ||
+        nbytes < 0) {
+        return ORBIS_DISC_MAP_ERROR_INVALID_ARGUMENT;
+    }
     *flags = 0;
     *ret1 = 0;
     *ret2 = 0;
@@ -27,11 +40,11 @@ int PS4_SYSV_ABI Func_7C980FFB0AA27E7A(char* path, s64 offset, s64 nbytes, int* 
 
 int PS4_SYSV_ABI Func_8A828CAEE7EDD5E9(char* path, s64 offset, s64 nbytes, int* flags, int* ret1,
                                        int* ret2) {
-    return ORBIS_DISC_MAP_ERROR_NO_BITMAP_INFO;
+    return Func_7C980FFB0AA27E7A(path, offset, nbytes, flags, ret1, ret2);
 }
 
 int PS4_SYSV_ABI Func_E7EBCE96E92F91F8() {
-    return ORBIS_DISC_MAP_ERROR_NO_BITMAP_INFO;
+    return ORBIS_OK;
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {

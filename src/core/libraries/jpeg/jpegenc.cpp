@@ -70,7 +70,7 @@ static s32 ValidateJpegEncEncodeParam(const OrbisJpegEncEncodeParam* param) {
          !Common::IsAligned(param->image_pitch, 4))) {
         return ORBIS_JPEG_ENC_ERROR_INVALID_PARAM;
     }
-    const auto calculated_size = param->image_height * param->image_pitch;
+    const u64 calculated_size = u64{param->image_height} * param->image_pitch;
     if (calculated_size > ORBIS_JPEG_ENC_MAX_IMAGE_SIZE || calculated_size > param->image_size) {
         return ORBIS_JPEG_ENC_ERROR_INVALID_PARAM;
     }

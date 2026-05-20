@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include <iostream>
 
 #include <magic_enum/magic_enum.hpp>
@@ -63,7 +64,12 @@ uint64_t SaveInstance::GetMaxBlockFromSFO(const PSF& psf) {
         return OrbisSaveDataBlocksMax;
     }
     auto value = vec.value();
-    return *(uint64_t*)value.data();
+    if (value.size() < sizeof(uint64_t)) {
+        return OrbisSaveDataBlocksMax;
+    }
+    uint64_t blocks{};
+    std::memcpy(&blocks, value.data(), sizeof(blocks));
+    return blocks;
 }
 
 fs::path SaveInstance::GetParamSFOPath(const fs::path& dir_path) {
@@ -198,14 +204,16 @@ void SaveInstance::Umount() {
         return;
     }
     mounted = false;
-    const bool ok = param_sfo.Encode(param_sfo_path);
-    if (!ok) {
-        throw fs::filesystem_error("Failed to write param.sfo", param_sfo_path,
-                                   std::make_error_code(std::errc::permission_denied));
+    if (!read_only) {
+        const bool ok = param_sfo.Encode(param_sfo_path);
+        if (!ok) {
+            throw fs::filesystem_error("Failed to write param.sfo", param_sfo_path,
+                                       std::make_error_code(std::errc::permission_denied));
+        }
+        fs::remove(corrupt_file_path);
     }
     param_sfo = PSF();
 
-    fs::remove(corrupt_file_path);
     g_mnt->Unmount(save_path, mount_point);
 }
 

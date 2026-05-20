@@ -925,9 +925,9 @@ s32 MemoryManager::MapFile(void** out_addr, VAddr virtual_addr, u64 size, Memory
         prot &= ~MemoryProt::CpuWrite;
     }
 
-    if (prot >= MemoryProt::GpuRead) {
-        // On real hardware, GPU file mmaps cause a full system crash due to an internal error.
-        ASSERT_MSG(false, "Files cannot be mapped to GPU memory");
+    if (True(prot & (MemoryProt::GpuRead | MemoryProt::GpuWrite))) {
+        LOG_WARNING(Kernel_Vmm, "Rejecting file mmap with GPU protection flags");
+        return ORBIS_KERNEL_ERROR_EINVAL;
     }
 
     if (True(prot & MemoryProt::CpuExec)) {
@@ -1301,6 +1301,9 @@ s32 MemoryManager::Protect(VAddr addr, u64 size, MemoryProt prot) {
 
 s32 MemoryManager::VirtualQuery(VAddr addr, s32 flags,
                                 ::Libraries::Kernel::OrbisVirtualQueryInfo* info) {
+    if (info == nullptr) {
+        return ORBIS_KERNEL_ERROR_EFAULT;
+    }
     // FindVMA on addresses before the vma_map return garbage data.
     auto query_addr =
         addr < impl.SystemManagedVirtualBase() ? impl.SystemManagedVirtualBase() : addr;
@@ -1349,6 +1352,9 @@ s32 MemoryManager::VirtualQuery(VAddr addr, s32 flags,
 
 s32 MemoryManager::DirectMemoryQuery(PAddr addr, bool find_next,
                                      ::Libraries::Kernel::OrbisQueryInfo* out_info) {
+    if (out_info == nullptr) {
+        return ORBIS_KERNEL_ERROR_EFAULT;
+    }
     if (addr >= total_direct_size) {
         LOG_WARNING(Kernel_Vmm, "Unable to find allocated direct memory region to query!");
         return ORBIS_KERNEL_ERROR_EACCES;
@@ -1525,7 +1531,12 @@ s32 MemoryManager::GetDirectMemoryType(PAddr addr, s32* directMemoryTypeOut,
     }
 
     std::shared_lock lk{mutex};
-    const auto& dmem_area = FindDmemArea(addr)->second;
+    const auto dmem_it = FindDmemArea(addr);
+    if (dmem_it == dmem_map.end()) {
+        LOG_ERROR(Kernel_Vmm, "Unable to find allocated direct memory region to check type!");
+        return ORBIS_KERNEL_ERROR_ENOENT;
+    }
+    const auto& dmem_area = dmem_it->second;
     if (dmem_area.dma_type == PhysicalMemoryType::Free) {
         LOG_ERROR(Kernel_Vmm, "Unable to find allocated direct memory region to check type!");
         return ORBIS_KERNEL_ERROR_ENOENT;
@@ -1539,7 +1550,9 @@ s32 MemoryManager::GetDirectMemoryType(PAddr addr, s32* directMemoryTypeOut,
 
 s32 MemoryManager::IsStack(VAddr addr, void** start, void** end) {
     std::shared_lock lk{mutex};
-    ASSERT_MSG(IsValidMapping(addr), "Attempted to access invalid address {:#x}", addr);
+    if (!IsValidMapping(addr)) {
+        return ORBIS_KERNEL_ERROR_EACCES;
+    }
     const auto& vma = FindVMA(addr)->second;
     if (vma.IsFree()) {
         return ORBIS_KERNEL_ERROR_EACCES;

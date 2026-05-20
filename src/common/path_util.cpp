@@ -7,6 +7,7 @@
 #include "common/path_util.h"
 #include "common/scope_exit.h"
 #include "common/types.h"
+#include "core/file_format/psf.h"
 
 #ifdef __APPLE__
 #include <CoreFoundation/CFBundle.h>
@@ -201,10 +202,23 @@ std::optional<fs::path> FindGameByID(const fs::path& dir, const std::string& gam
         return std::nullopt;
     }
 
-    // Check if this is the game we're looking for
-    if (dir.filename() == game_id && fs::exists(dir / "sce_sys" / "param.sfo")) {
-        auto eboot_path = dir / "eboot.bin";
-        if (fs::exists(eboot_path)) {
+    const auto param_sfo_path = dir / "sce_sys" / "param.sfo";
+    const auto eboot_path = dir / "eboot.bin";
+    if (fs::exists(param_sfo_path) && fs::exists(eboot_path)) {
+        bool is_match = dir.filename() == game_id;
+        PSF param_sfo;
+        if (!is_match && param_sfo.Open(param_sfo_path)) {
+            if (const auto title_id = param_sfo.GetString("TITLE_ID")) {
+                is_match = *title_id == game_id;
+            }
+            if (!is_match) {
+                if (const auto content_id = param_sfo.GetString("CONTENT_ID");
+                    content_id && content_id->size() >= 16) {
+                    is_match = content_id->substr(7, 9) == game_id;
+                }
+            }
+        }
+        if (is_match) {
             return eboot_path;
         }
     }

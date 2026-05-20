@@ -145,6 +145,9 @@ s32 PS4_SYSV_ABI sceKernelAvailableDirectMemorySize(u64 searchStart, u64 searchE
 s32 PS4_SYSV_ABI sceKernelVirtualQuery(const void* addr, s32 flags, OrbisVirtualQueryInfo* info,
                                        u64 infoSize) {
     LOG_INFO(Kernel_Vmm, "called addr = {}, flags = {:#x}", fmt::ptr(addr), flags);
+    if (info == nullptr || infoSize < sizeof(OrbisVirtualQueryInfo)) {
+        return ORBIS_KERNEL_ERROR_EFAULT;
+    }
     auto* memory = Core::Memory::Instance();
     return memory->VirtualQuery(std::bit_cast<VAddr>(addr), flags, info);
 }
@@ -390,6 +393,9 @@ s32 PS4_SYSV_ABI sceKernelMtypeprotect(const void* addr, u64 size, s32 mtype, s3
 s32 PS4_SYSV_ABI sceKernelDirectMemoryQuery(u64 offset, s32 flags, OrbisQueryInfo* query_info,
                                             u64 infoSize) {
     LOG_INFO(Kernel_Vmm, "called offset = {:#x}, flags = {:#x}", offset, flags);
+    if (query_info == nullptr || infoSize < sizeof(OrbisQueryInfo)) {
+        return ORBIS_KERNEL_ERROR_EFAULT;
+    }
     auto* memory = Core::Memory::Instance();
     return memory->DirectMemoryQuery(offset, flags == 1, query_info);
 }
@@ -410,6 +416,10 @@ s32 PS4_SYSV_ABI sceKernelGetDirectMemoryType(u64 addr, s32* directMemoryTypeOut
                                               void** directMemoryStartOut,
                                               void** directMemoryEndOut) {
     LOG_WARNING(Kernel_Vmm, "called, direct memory addr = {:#x}", addr);
+    if (directMemoryTypeOut == nullptr || directMemoryStartOut == nullptr ||
+        directMemoryEndOut == nullptr) {
+        return ORBIS_KERNEL_ERROR_EFAULT;
+    }
     auto* memory = Core::Memory::Instance();
     return memory->GetDirectMemoryType(addr, directMemoryTypeOut, directMemoryStartOut,
                                        directMemoryEndOut);
@@ -743,6 +753,9 @@ void* PS4_SYSV_ABI posix_mmap(void* addr, u64 len, s32 prot, s32 flags, s32 fd, 
 
 s32 PS4_SYSV_ABI sceKernelMmap(void* addr, u64 len, s32 prot, s32 flags, s32 fd, s64 phys_addr,
                                void** res) {
+    if (res == nullptr) {
+        return ORBIS_KERNEL_ERROR_EFAULT;
+    }
     void* addr_out = posix_mmap(addr, len, prot, flags, fd, phys_addr);
 
     if (addr_out == reinterpret_cast<void*>(-1)) {

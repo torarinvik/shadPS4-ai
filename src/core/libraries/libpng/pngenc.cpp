@@ -69,7 +69,7 @@ void PngEncWarning(png_structp png_ptr, png_const_charp error_message) {
 
 s32 PS4_SYSV_ABI scePngEncCreate(const OrbisPngEncCreateParam* param, void* memoryAddress,
                                  u32 memorySize, OrbisPngEncHandle* handle) {
-    if (param == nullptr || param->attribute != 0) {
+    if (param == nullptr || handle == nullptr || param->attribute != 0) {
         LOG_ERROR(Lib_Png, "Invalid param");
         return ORBIS_PNG_ENC_ERROR_INVALID_ADDR;
     }
@@ -77,6 +77,10 @@ s32 PS4_SYSV_ABI scePngEncCreate(const OrbisPngEncCreateParam* param, void* memo
     if (memoryAddress == nullptr) {
         LOG_ERROR(Lib_Png, "Invalid memory address");
         return ORBIS_PNG_ENC_ERROR_INVALID_ADDR;
+    }
+    if (memorySize < sizeof(PngHandler)) {
+        LOG_ERROR(Lib_Png, "Invalid memory size");
+        return ORBIS_PNG_ENC_ERROR_INVALID_SIZE;
     }
 
     if (param->max_image_width - 1 > 1000000) {
@@ -104,6 +108,9 @@ s32 PS4_SYSV_ABI scePngEncCreate(const OrbisPngEncCreateParam* param, void* memo
 }
 
 s32 PS4_SYSV_ABI scePngEncDelete(OrbisPngEncHandle handle) {
+    if (handle == nullptr) {
+        return ORBIS_PNG_ENC_ERROR_INVALID_HANDLE;
+    }
     auto pngh = (PngHandler*)handle;
     png_destroy_write_struct(&pngh->png_ptr, &pngh->info_ptr);
     return ORBIS_OK;
@@ -111,9 +118,6 @@ s32 PS4_SYSV_ABI scePngEncDelete(OrbisPngEncHandle handle) {
 
 s32 PS4_SYSV_ABI scePngEncEncode(OrbisPngEncHandle handle, const OrbisPngEncEncodeParam* param,
                                  OrbisPngEncOutputInfo* outputInfo) {
-    LOG_TRACE(Lib_Png, "called png addr = {}, image addr = {}, image size = {}",
-              (void*)param->png_mem_addr, (void*)param->image_mem_addr, param->image_mem_size);
-
     if (handle == nullptr) {
         LOG_ERROR(Lib_Png, "Invalid handle");
         return ORBIS_PNG_ENC_ERROR_INVALID_HANDLE;
@@ -123,6 +127,8 @@ s32 PS4_SYSV_ABI scePngEncEncode(OrbisPngEncHandle handle, const OrbisPngEncEnco
         LOG_ERROR(Lib_Png, "Invalid param");
         return ORBIS_PNG_ENC_ERROR_INVALID_PARAM;
     }
+    LOG_TRACE(Lib_Png, "called png addr = {}, image addr = {}, image size = {}",
+              (void*)param->png_mem_addr, (void*)param->image_mem_addr, param->image_mem_size);
 
     if (param->image_mem_addr == nullptr || param->png_mem_addr == nullptr) {
         LOG_ERROR(Lib_Png, "Invalid input or output address");
@@ -132,6 +138,13 @@ s32 PS4_SYSV_ABI scePngEncEncode(OrbisPngEncHandle handle, const OrbisPngEncEnco
     if (param->png_mem_size == 0 || param->image_mem_size == 0 || param->image_height == 0 ||
         param->image_width == 0) {
         LOG_ERROR(Lib_Png, "Invalid Size");
+        return ORBIS_PNG_ENC_ERROR_INVALID_SIZE;
+    }
+    const u32 bytes_per_pixel = 4;
+    const u64 minimum_pitch = u64{param->image_width} * bytes_per_pixel;
+    const u64 row_stride = param->image_pitch != 0 ? param->image_pitch : minimum_pitch;
+    if (row_stride < minimum_pitch || row_stride > param->image_mem_size / param->image_height) {
+        LOG_ERROR(Lib_Png, "Input image buffer is too small");
         return ORBIS_PNG_ENC_ERROR_INVALID_SIZE;
     }
 
@@ -172,9 +185,6 @@ s32 PS4_SYSV_ABI scePngEncEncode(OrbisPngEncHandle handle, const OrbisPngEncEnco
 
     png_write_info(pngh->png_ptr, pngh->info_ptr);
 
-    int channels = 4;
-    size_t row_stride = param->image_width * channels;
-
     uint32_t processed_height = 0;
 
     if (param->color_space == OrbisPngEncColorSpace::RGBA) {
@@ -199,7 +209,7 @@ s32 PS4_SYSV_ABI scePngEncEncode(OrbisPngEncHandle handle, const OrbisPngEncEnco
 
         for (; processed_height < param->image_height; ++processed_height) {
             const unsigned char* src =
-                param->image_mem_addr + processed_height * param->image_pitch;
+                param->image_mem_addr + processed_height * row_stride;
 
             uint8_t* dst = rgb_row.data();
 

@@ -381,6 +381,9 @@ File* HandleTable::GetEpoll(int d) {
         return nullptr;
     }
     auto file = m_files.at(d);
+    if (!file) {
+        return nullptr;
+    }
     if (file->type != Core::FileSys::FileType::Epoll) {
         return nullptr;
     }
@@ -393,6 +396,9 @@ File* HandleTable::GetResolver(int d) {
         return nullptr;
     }
     auto file = m_files.at(d);
+    if (!file) {
+        return nullptr;
+    }
     if (file->type != Core::FileSys::FileType::Resolver) {
         return nullptr;
     }
@@ -432,7 +438,7 @@ int HandleTable::GetFileDescriptor(File* file) {
     if (it != m_files.end()) {
         return std::distance(m_files.begin(), it);
     }
-    return 0;
+    return -1;
 }
 
 } // namespace Core::FileSys
