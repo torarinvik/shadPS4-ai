@@ -2,11 +2,33 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstring>
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <vector>
 #include "npbind.h"
+
+namespace {
+constexpr u64 MaxNpBindEntries = 4096;
+constexpr u16 NpCommIdType = 0x0010;
+constexpr u16 NpCommIdSize = 12;
+constexpr u16 TrophyType = 0x0011;
+constexpr u16 TrophySize = 12;
+constexpr u16 Unknown1Type = 0x0012;
+constexpr u16 Unknown1Size = 176;
+constexpr u16 Unknown2Type = 0x0013;
+constexpr u16 Unknown2Size = 16;
+
+bool IsSafeNpCommId(std::string_view value) {
+    if (value.size() != NpCommIdSize || !value.starts_with("NP")) {
+        return false;
+    }
+    return std::all_of(value.begin(), value.end(), [](char ch) {
+        return (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9');
+    });
+}
+} // namespace
 
 bool NPBindFile::Load(const std::string& path) {
     Clear(); // Clear any existing data
@@ -31,6 +53,8 @@ bool NPBindFile::Load(const std::string& path) {
     // Read header
     memcpy(&m_header, buf.data(), sizeof(NpBindHeader));
     if (m_header.magic != NPBIND_MAGIC)
+        return false;
+    if (m_header.num_entries > MaxNpBindEntries)
         return false;
 
     // offset start of bodies
@@ -68,11 +92,19 @@ bool NPBindFile::Load(const std::string& path) {
         // read 4 entries in order
         if (!read_entry(body.npcommid))
             return false;
+        if (body.npcommid.type != NpCommIdType || body.npcommid.size != NpCommIdSize)
+            return false;
         if (!read_entry(body.trophy))
+            return false;
+        if (body.trophy.type != TrophyType || body.trophy.size != TrophySize)
             return false;
         if (!read_entry(body.unk1))
             return false;
+        if (body.unk1.type != Unknown1Type || body.unk1.size != Unknown1Size)
+            return false;
         if (!read_entry(body.unk2))
+            return false;
+        if (body.unk2.type != Unknown2Type || body.unk2.size != Unknown2Size)
             return false;
 
         // skip fixed padding after body if present (but don't overrun)
@@ -106,7 +138,9 @@ std::vector<std::string> NPBindFile::GetNpCommIds() const {
         if (!body.npcommid.data.empty()) {
             std::string raw_string(reinterpret_cast<const char*>(body.npcommid.data.data()),
                                    body.npcommid.data.size());
-            npcommids.push_back(raw_string);
+            if (IsSafeNpCommId(raw_string)) {
+                npcommids.push_back(raw_string);
+            }
         }
     }
 

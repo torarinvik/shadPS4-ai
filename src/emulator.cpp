@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2025-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <set>
 #include <sstream>
@@ -65,6 +67,24 @@ int CurrentPidForRestart() {
 
 void WaitForDebuggerAttachForRun() {
     Debugger::WaitForDebuggerAttach();
+}
+
+bool IsSafeHostPathComponent(std::string_view value) {
+    if (value.empty() || value.size() > 64 || value == "." || value == "..") {
+        return false;
+    }
+    return std::all_of(value.begin(), value.end(), [](const char ch) {
+        return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+               (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
+    });
+}
+
+std::string SafeGameIdForHostPath(std::string_view id) {
+    if (IsSafeHostPathComponent(id)) {
+        return std::string{id};
+    }
+    const auto hash = std::hash<std::string_view>{}(id);
+    return fmt::format("UNKNOWN_{:016x}", hash);
 }
 
 } // namespace
@@ -191,6 +211,10 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
             sdk_version = std::stoi(sdk_ver_string, nullptr, 16);
         }
     }
+    const auto host_safe_id = SafeGameIdForHostPath(id);
+    if (host_safe_id != id) {
+        LOG_WARNING(Loader, "Using sanitized game id '{}' for host filesystem paths", host_safe_id);
+    }
 
     auto guest_eboot_path = "/app0/" + eboot_name.generic_string();
     const auto eboot_path = mnt->GetHostPath(guest_eboot_path);
@@ -232,6 +256,12 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
                     if (filename.find(pattern) == 0) {
                         // Extract the number part
                         std::string numStr = filename.substr(pattern.length());
+                        if (numStr.empty() ||
+                            !std::all_of(numStr.begin(), numStr.end(), [](const char ch) {
+                                return ch >= '0' && ch <= '9';
+                            })) {
+                            continue;
+                        }
                         int trophy_index = std::stoi(numStr);
                         trophyFiles.emplace_back(trophy_index, filename);
                     }
@@ -360,6 +390,10 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
         int index = 0;
         for (std::string npCommId : game_info.npCommIds) {
+            if (!IsSafeHostPathComponent(npCommId)) {
+                LOG_WARNING(Loader, "Skipping unsafe NP communication id '{}'", npCommId);
+                continue;
+            }
             const auto trophyOutputDir =
                 Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "trophy" / npCommId;
             if (!std::filesystem::exists(trophyOutputDir)) {
@@ -414,7 +448,8 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     mnt->Mount(mount_data_dir, "/data");
 
     // Mounting temp folders
-    const auto& mount_temp_dir = Common::FS::GetUserPath(Common::FS::PathType::TempDataDir) / id;
+    const auto& mount_temp_dir =
+        Common::FS::GetUserPath(Common::FS::PathType::TempDataDir) / host_safe_id;
     if (std::filesystem::exists(mount_temp_dir)) {
         // Temp folder should be cleared on each boot.
         std::filesystem::remove_all(mount_temp_dir);
@@ -424,7 +459,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     mnt->Mount(mount_temp_dir, "/temp");
 
     const auto& mount_download_dir =
-        Common::FS::GetUserPath(Common::FS::PathType::DownloadDir) / id;
+        Common::FS::GetUserPath(Common::FS::PathType::DownloadDir) / host_safe_id;
     if (!std::filesystem::exists(mount_download_dir)) {
         std::filesystem::create_directory(mount_download_dir);
     }
@@ -434,7 +469,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     if (!std::filesystem::exists(mount_captures_dir)) {
         std::filesystem::create_directory(mount_captures_dir);
     }
-    VideoCore::SetOutputDir(mount_captures_dir, id);
+    VideoCore::SetOutputDir(mount_captures_dir, host_safe_id);
 
     // Mount system fonts
     const auto& fonts_dir = EmulatorSettings.GetFontsDir();

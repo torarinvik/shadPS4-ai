@@ -111,7 +111,9 @@ void NormalDirectory::RebuildDirents() {
     u64 dirent_offset = 0;
     u64 last_reclen_offset = 4;
     dirent_cache_bin.clear();
-    dirent_cache_bin.reserve(512);
+    next_ceiling = 512;
+    dirent_cache_bin.resize(next_ceiling);
+    std::fill(dirent_cache_bin.begin(), dirent_cache_bin.end(), 0);
 
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
@@ -120,19 +122,26 @@ void NormalDirectory::RebuildDirents() {
                              const std::filesystem::path& ent_path, const bool ent_is_file) {
             NormalDirectoryDirent tmp{};
             std::string leaf(ent_path.filename().string());
+            if (leaf.size() >= sizeof(tmp.d_name)) {
+                LOG_WARNING(Kernel_Fs, "Skipping overlong directory entry '{}'", leaf);
+                return;
+            }
 
             // prepare dirent
             tmp.d_fileno = BaseDirectory::next_fileno();
-            tmp.d_namlen = leaf.size();
-            strncpy(tmp.d_name, leaf.data(), tmp.d_namlen + 1);
+            tmp.d_namlen = static_cast<u8>(leaf.size());
+            std::memcpy(tmp.d_name, leaf.data(), leaf.size());
+            tmp.d_name[leaf.size()] = '\0';
             tmp.d_type = (ent_is_file ? 0100000 : 0040000) >> 12;
             tmp.d_reclen = Common::AlignUp(dirent_meta_size + tmp.d_namlen + 1, 4);
 
             // next element may break 512 byte alignment
             if (tmp.d_reclen + dirent_offset > next_ceiling) {
                 // align previous dirent's size to the current ceiling
-                *reinterpret_cast<u16*>(static_cast<u8*>(dirent_cache_bin.data()) +
-                                        last_reclen_offset) += next_ceiling - dirent_offset;
+                if (dirent_offset != 0) {
+                    *reinterpret_cast<u16*>(static_cast<u8*>(dirent_cache_bin.data()) +
+                                            last_reclen_offset) += next_ceiling - dirent_offset;
+                }
                 // set writing pointer to the aligned start position (current ceiling)
                 dirent_offset = next_ceiling;
                 // move the ceiling up and zero-out the buffer
@@ -149,11 +158,13 @@ void NormalDirectory::RebuildDirents() {
         });
 
     // last reclen, as before
-    *reinterpret_cast<u16*>(static_cast<u8*>(dirent_cache_bin.data()) + last_reclen_offset) +=
-        next_ceiling - dirent_offset;
+    if (dirent_offset != 0) {
+        *reinterpret_cast<u16*>(static_cast<u8*>(dirent_cache_bin.data()) + last_reclen_offset) +=
+            next_ceiling - dirent_offset;
+    }
 
     // i have no idea if this is the case, but lseek returns size aligned to 512
-    directory_size = next_ceiling;
+    directory_size = dirent_offset == 0 ? 0 : next_ceiling;
 }
 
 } // namespace Core::Directories

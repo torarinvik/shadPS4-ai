@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <system_error>
+#include "common/logging/log.h"
 #include "common/string_util.h"
 #include "core/file_sys/devices/logger.h"
 #include "core/file_sys/devices/nop_device.h"
@@ -24,11 +26,74 @@ static bool IsHostSidecarEntry(const std::filesystem::path& path) {
     return Common::ToLower(path.filename().string()) == ".ds_store";
 }
 
+static bool IsSafeGuestRelativePath(std::string_view rel_path) {
+    if (rel_path.empty() || rel_path.find('\0') != std::string_view::npos) {
+        return false;
+    }
+
+    std::filesystem::path parsed{std::string{rel_path}};
+    if (parsed.is_absolute() || parsed.has_root_name()) {
+        return false;
+    }
+
+    for (const auto& component : parsed) {
+        if (component.empty() || component == "." || component == ".." ||
+            component.has_root_path()) {
+            return false;
+        }
+#ifdef _WIN32
+        const auto component_string = component.string();
+        if (component_string.find('\\') != std::string::npos ||
+            component_string.find(':') != std::string::npos) {
+            return false;
+        }
+#endif
+    }
+
+    return true;
+}
+
+static std::filesystem::path CanonicalRoot(const std::filesystem::path& root) {
+    std::error_code ec;
+    auto canonical = std::filesystem::weakly_canonical(root, ec);
+    return ec ? root.lexically_normal() : canonical;
+}
+
+static bool IsPathContainedInRoot(const std::filesystem::path& path,
+                                  const std::filesystem::path& root) {
+    std::error_code ec;
+    const auto normalized_root = CanonicalRoot(root);
+    const auto normalized_path = std::filesystem::weakly_canonical(path, ec);
+    const auto checked_path = ec ? path.lexically_normal() : normalized_path;
+    const auto relative = std::filesystem::relative(checked_path, normalized_root, ec);
+    if (ec || relative.empty()) {
+        return checked_path == normalized_root;
+    }
+    return relative.native() != ".." && *relative.begin() != "..";
+}
+
+static std::filesystem::path SafeJoinHostPath(const std::filesystem::path& root,
+                                              std::string_view rel_path) {
+    if (!IsSafeGuestRelativePath(rel_path)) {
+        LOG_WARNING(Kernel_Fs, "Rejected unsafe guest relative path '{}'", rel_path);
+        return {};
+    }
+
+    const auto joined = (root / std::filesystem::path{std::string{rel_path}}).lexically_normal();
+    if (!IsPathContainedInRoot(joined, root)) {
+        LOG_WARNING(Kernel_Fs, "Rejected guest path escape '{}' under '{}'", joined.string(),
+                    root.string());
+        return {};
+    }
+
+    return joined;
+}
+
 void MntPoints::Mount(const std::filesystem::path& host_folder, const std::string& guest_folder,
                       bool read_only) {
     std::scoped_lock lock{m_mutex};
     const auto guest_folder_sanitized = RemoveTrailingSlashes(guest_folder);
-    m_mnt_pairs.emplace_back(host_folder, guest_folder_sanitized, read_only);
+    m_mnt_pairs.emplace_back(CanonicalRoot(host_folder), guest_folder_sanitized, read_only);
 }
 
 void MntPoints::Unmount(const std::filesystem::path& host_folder, const std::string& guest_folder) {
@@ -55,7 +120,7 @@ std::filesystem::path MntPoints::GetHostPath(std::string_view path, bool* is_rea
         pos = corrected_path.find("//", pos + 1);
     }
 
-    if (path.length() > 255)
+    if (corrected_path.length() > 255)
         return "";
 
     const std::optional<MntPair> mount = GetMount(corrected_path);
@@ -75,18 +140,21 @@ std::filesystem::path MntPoints::GetHostPath(std::string_view path, bool* is_rea
 
     // Remove device (e.g /app0) from path to retrieve relative path.
     const auto rel_path = std::string_view{corrected_path}.substr(mount->mount.size() + 1);
-    std::filesystem::path host_path = mount->host_path / rel_path;
+    std::filesystem::path host_path = SafeJoinHostPath(mount->host_path, rel_path);
+    if (host_path.empty()) {
+        return {};
+    }
     std::filesystem::path patch_path = mount->host_path;
     patch_path += "-UPDATE";
     if (!std::filesystem::exists(patch_path)) {
         patch_path = mount->host_path;
         patch_path += "-patch";
     }
-    patch_path /= rel_path;
+    patch_path = SafeJoinHostPath(patch_path, rel_path);
 
     std::filesystem::path mods_path = mount->host_path;
     mods_path += "-mods";
-    mods_path /= rel_path;
+    mods_path = SafeJoinHostPath(mods_path, rel_path);
 
     if (path_type == HostPathType::Mod) {
         return mods_path;
@@ -194,6 +262,9 @@ std::filesystem::path MntPoints::GetHostPath(std::string_view path, bool* is_rea
 void MntPoints::IterateDirectory(std::string_view guest_directory,
                                  const IterateDirectoryCallback& callback) {
     const auto base_path = GetHostPath(guest_directory, nullptr, HostPathType::Base);
+    if (base_path.empty()) {
+        return;
+    }
 
     // Forces path types so as not to resolve to base path
     const auto patch_path = GetHostPath(guest_directory, nullptr, HostPathType::Patch);

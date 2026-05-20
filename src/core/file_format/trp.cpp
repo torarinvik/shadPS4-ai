@@ -7,6 +7,66 @@
 #include "common/path_util.h"
 #include "core/file_format/trp.h"
 
+namespace {
+constexpr u64 MaxTrpEntrySize = 64ULL * 1024ULL * 1024ULL;
+constexpr u64 MaxTrpTotalExtractSize = 256ULL * 1024ULL * 1024ULL;
+
+std::optional<std::string> SafeTrpEntryName(const TrpEntry& entry) {
+    const auto* begin = entry.entry_name;
+    const auto* end = std::find(begin, begin + sizeof(entry.entry_name), '\0');
+    if (end == begin || end == begin + sizeof(entry.entry_name)) {
+        return std::nullopt;
+    }
+
+    std::string name{begin, end};
+    if (name == "." || name == "..") {
+        return std::nullopt;
+    }
+
+    const std::filesystem::path parsed{name};
+    if (parsed.is_absolute() || parsed.has_root_name()) {
+        return std::nullopt;
+    }
+
+    for (const auto& component : parsed) {
+        if (component.empty() || component == "." || component == ".." ||
+            component.has_root_path()) {
+            return std::nullopt;
+        }
+    }
+
+    if (name.find('/') != std::string::npos || name.find('\\') != std::string::npos ||
+        name.find(':') != std::string::npos) {
+        return std::nullopt;
+    }
+
+    return name;
+}
+
+bool IsSafeOutputPath(const std::filesystem::path& root, const std::filesystem::path& output) {
+    std::error_code ec;
+    const auto canonical_root = std::filesystem::weakly_canonical(root, ec);
+    const auto checked_root = ec ? root.lexically_normal() : canonical_root;
+    const auto canonical_output = std::filesystem::weakly_canonical(output, ec);
+    const auto checked_output = ec ? output.lexically_normal() : canonical_output;
+    const auto relative = std::filesystem::relative(checked_output, checked_root, ec);
+    if (ec || relative.empty()) {
+        return checked_output == checked_root;
+    }
+    return relative.native() != ".." && *relative.begin() != "..";
+}
+
+bool ValidateTrpEntryRange(const TrpEntry& entry, u64 file_size) {
+    if (entry.entry_len > MaxTrpEntrySize || entry.entry_pos > file_size ||
+        entry.entry_len > file_size - entry.entry_pos) {
+        LOG_WARNING(Common_Filesystem, "Skipping unsafe TRP entry range pos={:#x} len={:#x}",
+                    static_cast<u64>(entry.entry_pos), static_cast<u64>(entry.entry_len));
+        return false;
+    }
+    return true;
+}
+} // namespace
+
 static void DecryptEFSM(std::span<const u8, 16> trophyKey, std::span<const u8, 16> NPcommID,
                         std::span<const u8, 16> efsmIv, std::span<const u8> ciphertext,
                         std::span<u8> decrypted) {
@@ -106,7 +166,20 @@ bool TRP::Extract(const std::filesystem::path& trophyPath, int index, std::strin
             return false;
         }
 
+        const u64 actual_file_size = file.GetSize();
+        if (header.file_size > actual_file_size || header.entry_size < sizeof(TrpEntry)) {
+            LOG_ERROR(Common_Filesystem, "Invalid TRP header sizes in {}", it.string());
+            return false;
+        }
+        if (header.entry_num > 4096 ||
+            header.entry_num > (actual_file_size - sizeof(TrpHeader)) / header.entry_size) {
+            LOG_ERROR(Common_Filesystem, "Invalid TRP entry count {} in {}",
+                      static_cast<u32>(header.entry_num), it.string());
+            return false;
+        }
+
         s64 seekPos = sizeof(TrpHeader);
+        u64 extracted_size = 0;
         // Create output directories
         if (!std::filesystem::create_directories(outputPath / "Icons") ||
             !std::filesystem::create_directories(outputPath / "Xml")) {
@@ -130,17 +203,28 @@ bool TRP::Extract(const std::filesystem::path& trophyPath, int index, std::strin
                 break;
             }
 
-            std::string_view name(entry.entry_name);
+            const auto name = SafeTrpEntryName(entry);
+            if (!name || !ValidateTrpEntryRange(entry, actual_file_size)) {
+                success = false;
+                continue;
+            }
+            if (entry.entry_len > MaxTrpTotalExtractSize - extracted_size) {
+                LOG_WARNING(Common_Filesystem, "Skipping TRP entry '{}' due to extraction limit",
+                            *name);
+                success = false;
+                continue;
+            }
+            extracted_size += entry.entry_len;
 
             if (entry.flag == ENTRY_FLAG_PNG) {
-                if (!ProcessPngEntry(file, entry, outputPath, name)) {
+                if (!ProcessPngEntry(file, entry, outputPath, *name)) {
                     success = false;
                     // Continue with next entry
                 }
             } else if (entry.flag == ENTRY_FLAG_ENCRYPTED_XML) {
                 // Check if we have a valid NPCommID for decryption
                 if (npCommId.size() >= 12 && npCommId[0] == 'N' && npCommId[1] == 'P') {
-                    if (!ProcessEncryptedXmlEntry(file, entry, outputPath, name, user_key,
+                    if (!ProcessEncryptedXmlEntry(file, entry, outputPath, *name, user_key,
                                                   npCommId)) {
                         success = false;
                         // Continue with next entry
@@ -152,7 +236,7 @@ bool TRP::Extract(const std::filesystem::path& trophyPath, int index, std::strin
                 }
             } else {
                 LOG_DEBUG(Common_Filesystem, "Unknown entry flag: {} for {}",
-                          static_cast<unsigned int>(entry.flag), name);
+                          static_cast<unsigned int>(entry.flag), *name);
             }
             trpFileIndex++;
         }
@@ -187,6 +271,10 @@ bool TRP::ProcessPngEntry(Common::FS::IOFile& file, const TrpEntry& entry,
     }
 
     auto outputFile = outputPath / "Icons" / name;
+    if (!IsSafeOutputPath(outputPath / "Icons", outputFile)) {
+        LOG_ERROR(Common_Filesystem, "Rejected unsafe PNG trophy output path: {}", name);
+        return false;
+    }
     size_t written = Common::FS::IOFile::WriteBytes(outputFile, icon);
     if (written != icon.size()) {
         LOG_ERROR(Common_Filesystem, "PNG write failed: wanted {} bytes, wrote {}", icon.size(),
@@ -248,13 +336,17 @@ bool TRP::ProcessEncryptedXmlEntry(Common::FS::IOFile& file, const TrpEntry& ent
     removePadding(XML);
 
     // Create output filename (replace ESFM with XML)
-    std::string xml_name(entry.entry_name);
+    std::string xml_name{name};
     size_t pos = xml_name.find("ESFM");
     if (pos != std::string::npos) {
         xml_name.replace(pos, 4, "XML");
     }
 
     auto outputFile = outputPath / "Xml" / xml_name;
+    if (!IsSafeOutputPath(outputPath / "Xml", outputFile)) {
+        LOG_ERROR(Common_Filesystem, "Rejected unsafe XML trophy output path: {}", xml_name);
+        return false;
+    }
     size_t written = Common::FS::IOFile::WriteBytes(outputFile, XML);
     if (written != XML.size()) {
         LOG_ERROR(Common_Filesystem, "XML write failed: wanted {} bytes, wrote {}", XML.size(),
