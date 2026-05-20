@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <vector>
 #include "common/assert.h"
 #include "common/alignment.h"
 #include "common/debug.h"
@@ -295,8 +296,23 @@ void BufferCache::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gd
                    "marked GPU-modified address={:#x} size={} value={:#x}",
                    address, num_bytes, value);
         if (!aliases_image && !IsRegionGpuModified(address, num_bytes)) {
-            u32* buffer = std::bit_cast<u32*>(address);
-            std::fill(buffer, buffer + num_bytes / sizeof(u32), value);
+            if ((num_bytes % sizeof(u32)) != 0 ||
+                !memory->IsValidMapping(address, num_bytes)) {
+                LOG_ERROR(Render_Vulkan,
+                          "Invalid CPU FillBuffer fast path address={:#x} size={} value={:#x}",
+                          address, num_bytes, value);
+                return;
+            }
+            for (u32 offset = 0; offset < num_bytes; offset += sizeof(value)) {
+                if (!memory->TryWriteGuestMemory(std::bit_cast<void*>(address + offset), &value,
+                                                 sizeof(value))) {
+                    LOG_ERROR(Render_Vulkan,
+                              "Failed CPU FillBuffer fast path write address={:#x} size={} "
+                              "value={:#x}",
+                              address + offset, sizeof(value), value);
+                    return;
+                }
+            }
             return;
         }
         texture_cache.InvalidateMemoryFromGPU(address, num_bytes);
@@ -339,7 +355,19 @@ void BufferCache::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, 
         if (!src_gds && !IsRegionGpuModified(src, num_bytes) && !src_aliases_image &&
             !dst_aliases_image) {
             // Both buffers were not transferred to GPU yet. Can safely copy in host memory.
-            memcpy(std::bit_cast<void*>(dst), std::bit_cast<void*>(src), num_bytes);
+            if (!memory->IsValidMapping(src, num_bytes) || !memory->IsValidMapping(dst, num_bytes)) {
+                LOG_ERROR(Render_Vulkan,
+                          "Invalid CPU CopyBuffer fast path dst={:#x} src={:#x} size={}", dst,
+                          src, num_bytes);
+                return;
+            }
+            std::vector<u8> tmp(num_bytes);
+            memory->CopySparseMemory(src, tmp.data(), num_bytes);
+            if (!memory->TryWriteGuestMemory(std::bit_cast<void*>(dst), tmp.data(), tmp.size())) {
+                LOG_ERROR(Render_Vulkan,
+                          "Failed CPU CopyBuffer fast path write dst={:#x} src={:#x} size={}", dst,
+                          src, num_bytes);
+            }
             return;
         }
         // Without a readback there's nothing we can do with this

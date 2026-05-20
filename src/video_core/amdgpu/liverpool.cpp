@@ -3,6 +3,9 @@
 
 #include <boost/preprocessor/stringize.hpp>
 
+#include <optional>
+#include <string_view>
+
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/polyfill_thread.h"
@@ -30,6 +33,63 @@ static_assert(Liverpool::NumComputeRings <= MAX_NAMES);
 #define NAME_ARRAY(name, num) {BOOST_PP_REPEAT(num, NAME_NUM, name)}
 
 static const char* acb_task_name[] = NAME_ARRAY(ACB_TASK, MAX_NAMES);
+
+static bool SafePm4Write(VAddr address, const void* data, u32 num_bytes, std::string_view context) {
+    auto* memory = Core::Memory::Instance();
+    if (num_bytes == 0) {
+        return true;
+    }
+    if (!memory->IsValidMapping(address, num_bytes)) {
+        LOG_ERROR(Render, "{} invalid PM4 write address={:#x} size={}", context, address,
+                  num_bytes);
+        return false;
+    }
+    if (!memory->TryWriteGuestMemory(std::bit_cast<void*>(address), data, num_bytes)) {
+        LOG_ERROR(Render, "{} failed PM4 write address={:#x} size={}", context, address,
+                  num_bytes);
+        return false;
+    }
+    return true;
+}
+
+template <typename T>
+static std::optional<T> SafePm4Read(VAddr address, std::string_view context) {
+    auto* memory = Core::Memory::Instance();
+    if (!memory->IsValidMapping(address, sizeof(T))) {
+        LOG_ERROR(Render, "{} invalid PM4 read address={:#x} size={}", context, address,
+                  sizeof(T));
+        return std::nullopt;
+    }
+    T value{};
+    memory->CopySparseMemory(address, reinterpret_cast<u8*>(&value), sizeof(T));
+    return value;
+}
+
+static bool SafePm4SemaphoreSignal(const PM4CmdMemSemaphore* semaphore, std::string_view context) {
+    const VAddr address = semaphore->Address<VAddr>();
+    auto value = SafePm4Read<u64>(address, context);
+    if (!value) {
+        return false;
+    }
+    switch (semaphore->signal_type) {
+    case PM4CmdMemSemaphore::SignalType::Increment:
+        *value += 1;
+        break;
+    case PM4CmdMemSemaphore::SignalType::Write:
+        *value = 1;
+        break;
+    default:
+        LOG_ERROR(Render, "{} unknown semaphore signal type {}", context,
+                  static_cast<u32>(semaphore->signal_type.Value()));
+        return false;
+    }
+    return SafePm4Write(address, &*value, sizeof(*value), context);
+}
+
+static std::optional<u64> SafePm4SemaphoreValue(const PM4CmdMemSemaphore* semaphore,
+                                                std::string_view context) {
+    return SafePm4Read<u64>(semaphore->Address<VAddr>(), context);
+}
 
 #define YIELD(name)                                                                                \
     FIBER_EXIT;                                                                                    \
@@ -680,9 +740,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     if (event->event_type.Value() == EventType::PixelPipeStatDump) {
                         static constexpr u64 OcclusionCounterValidMask = 0x8000000000000000ULL;
                         static constexpr u64 OcclusionCounterStep = 0x2FFFFFFULL;
-                        u64* results = event->Address<u64*>();
-                        for (s32 i = 0; i < num_counter_pairs; ++i, results += 2) {
-                            *results = pixel_counter | OcclusionCounterValidMask;
+                        VAddr results = event->Address<VAddr>();
+                        for (s32 i = 0; i < num_counter_pairs; ++i, results += sizeof(u64) * 2) {
+                            const u64 value = pixel_counter | OcclusionCounterValidMask;
+                            SafePm4Write(results, &value, sizeof(value), "PixelPipeStatDump");
                         }
                         pixel_counter += OcclusionCounterStep;
                     }
@@ -692,17 +753,16 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             case PM4ItOpcode::EventWriteEos: {
                 const auto* event_eos = reinterpret_cast<const PM4CmdEventWriteEos*>(header);
                 event_eos->SignalFence([](void* address, u64 data, u32 num_bytes) {
-                    auto* memory = Core::Memory::Instance();
-                    if (!memory->TryWriteBacking(address, &data, num_bytes)) {
-                        memcpy(address, &data, num_bytes);
-                    }
+                    SafePm4Write(std::bit_cast<VAddr>(address), &data, num_bytes,
+                                 "EventWriteEos");
                 });
                 if (event_eos->command == PM4CmdEventWriteEos::Command::GdsStore) {
                     ASSERT(event_eos->size == 1);
                     if (rasterizer) {
                         rasterizer->Finish();
                         const u32 value = rasterizer->ReadDataFromGds(event_eos->gds_index);
-                        *event_eos->Address() = value;
+                        SafePm4Write(std::bit_cast<VAddr>(event_eos->Address()), &value,
+                                     sizeof(value), "EventWriteEos GdsStore");
                     }
                 }
                 break;
@@ -711,10 +771,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 const auto* event_eop = reinterpret_cast<const PM4CmdEventWriteEop*>(header);
                 event_eop->SignalFence(
                     [](void* address, u64 data, u32 num_bytes) {
-                        auto* memory = Core::Memory::Instance();
-                        if (!memory->TryWriteBacking(address, &data, num_bytes)) {
-                            memcpy(address, &data, num_bytes);
-                        }
+                        SafePm4Write(std::bit_cast<VAddr>(address), &data, num_bytes,
+                                     "EventWriteEop");
                     },
                     [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
                 break;
@@ -759,9 +817,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(header);
                 ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
                 const u32 data_size = (header->type3.count.Value() - 2) * 4;
-                u64* address = write_data->Address<u64*>();
                 if (!write_data->wr_one_addr.Value()) {
-                    std::memcpy(address, write_data->data, data_size);
+                    SafePm4Write(write_data->addr64, write_data->data, data_size,
+                                 "Graphics WriteData");
                 } else {
                     UNREACHABLE();
                 }
@@ -780,12 +838,25 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             case PM4ItOpcode::MemSemaphore: {
                 const auto* mem_semaphore = reinterpret_cast<const PM4CmdMemSemaphore*>(header);
                 if (mem_semaphore->IsSignaling()) {
-                    mem_semaphore->Signal();
+                    SafePm4SemaphoreSignal(mem_semaphore, "Graphics MemSemaphore");
                 } else {
-                    while (!mem_semaphore->Signaled()) {
-                        YIELD_GFX();
+                    auto value = SafePm4SemaphoreValue(mem_semaphore, "Graphics MemSemaphore");
+                    if (!value) {
+                        break;
                     }
-                    mem_semaphore->Decrement();
+                    while (*value == 0) {
+                        YIELD_GFX();
+                        value = SafePm4SemaphoreValue(mem_semaphore, "Graphics MemSemaphore");
+                        if (!value) {
+                            break;
+                        }
+                    }
+                    if (!value) {
+                        break;
+                    }
+                    *value -= 1;
+                    SafePm4Write(mem_semaphore->Address<VAddr>(), &*value, sizeof(*value),
+                                 "Graphics MemSemaphore");
                 }
                 break;
             }
@@ -806,6 +877,13 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             case PM4ItOpcode::WaitRegMem: {
                 const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
                 // ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
+                if (wait_reg_mem->mem_space.Value() == PM4CmdWaitRegMem::MemSpace::Memory &&
+                    !Core::Memory::Instance()->IsValidMapping(wait_reg_mem->Address<VAddr>(),
+                                                              sizeof(u32))) {
+                    LOG_ERROR(Render, "Graphics WaitRegMem invalid poll address={:#x}",
+                              wait_reg_mem->Address<VAddr>());
+                    break;
+                }
                 // Optimization: VO label waits are special because the emulator
                 // will write to the label when presentation is finished. So if
                 // there are no other submits to yield to we can sleep the thread
@@ -1109,7 +1187,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
             const u32 data_size = (header->type3.count.Value() - 2) * 4;
             if (!write_data->wr_one_addr.Value()) {
-                std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
+                SafePm4Write(write_data->addr64, write_data->data, data_size, "Compute WriteData");
             } else {
                 UNREACHABLE();
             }
@@ -1118,18 +1196,38 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         case PM4ItOpcode::MemSemaphore: {
             const auto* mem_semaphore = reinterpret_cast<const PM4CmdMemSemaphore*>(header);
             if (mem_semaphore->IsSignaling()) {
-                mem_semaphore->Signal();
+                SafePm4SemaphoreSignal(mem_semaphore, "Compute MemSemaphore");
             } else {
-                while (!mem_semaphore->Signaled()) {
-                    YIELD_ASC(vqid);
+                auto value = SafePm4SemaphoreValue(mem_semaphore, "Compute MemSemaphore");
+                if (!value) {
+                    break;
                 }
-                mem_semaphore->Decrement();
+                while (*value == 0) {
+                    YIELD_ASC(vqid);
+                    value = SafePm4SemaphoreValue(mem_semaphore, "Compute MemSemaphore");
+                    if (!value) {
+                        break;
+                    }
+                }
+                if (!value) {
+                    break;
+                }
+                *value -= 1;
+                SafePm4Write(mem_semaphore->Address<VAddr>(), &*value, sizeof(*value),
+                             "Compute MemSemaphore");
             }
             break;
         }
         case PM4ItOpcode::WaitRegMem: {
             const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
             ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
+            if (wait_reg_mem->mem_space.Value() == PM4CmdWaitRegMem::MemSpace::Memory &&
+                !Core::Memory::Instance()->IsValidMapping(wait_reg_mem->Address<VAddr>(),
+                                                          sizeof(u32))) {
+                LOG_ERROR(Render, "Compute WaitRegMem invalid poll address={:#x}",
+                          wait_reg_mem->Address<VAddr>());
+                break;
+            }
             while (!wait_reg_mem->Test(regs.reg_array)) {
                 YIELD_ASC(vqid);
             }
@@ -1138,6 +1236,9 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         case PM4ItOpcode::ReleaseMem: {
             const auto* release_mem = reinterpret_cast<const PM4CmdReleaseMem*>(header);
             release_mem->SignalFence(
+                [](VAddr address, u64 data, u32 num_bytes) {
+                    SafePm4Write(address, &data, num_bytes, "ReleaseMem");
+                },
                 [pipe_id = queue.pipe_id] {
                     Platform::IrqC::Instance()->Signal(static_cast<Platform::InterruptId>(pipe_id));
                 },
