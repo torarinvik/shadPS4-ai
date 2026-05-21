@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <mutex>
+#include <array>
+#include <cstdlib>
+#include <unordered_map>
+#include <fmt/format.h>
 #include "common/arch.h"
 #include "common/assert.h"
 #include "core/libraries/kernel/threads/pthread.h"
@@ -27,6 +31,59 @@
 #endif
 
 namespace Core {
+
+static std::mutex g_host_call_names_mutex;
+static std::unordered_map<u64, std::string> g_host_call_names;
+
+static bool TraceHleCallsEnabled() {
+    static const bool enabled = std::getenv("SHADPS4_TRACE_HLE_CALLS") != nullptr;
+    return enabled;
+}
+
+struct RecentHostCalls {
+    static constexpr size_t Capacity = 64;
+    std::array<u64, Capacity> wrappers{};
+    size_t next{};
+    size_t count{};
+};
+
+static thread_local RecentHostCalls t_recent_host_calls;
+
+void RegisterHostCallName(u64 wrapper, std::string_view name) {
+    std::scoped_lock lock{g_host_call_names_mutex};
+    g_host_call_names.try_emplace(wrapper, name);
+}
+
+void TraceHostCall(u64 wrapper) {
+    if (!TraceHleCallsEnabled()) {
+        return;
+    }
+
+    auto& recent = t_recent_host_calls;
+    recent.wrappers[recent.next] = wrapper;
+    recent.next = (recent.next + 1) % RecentHostCalls::Capacity;
+    recent.count = std::min(recent.count + 1, RecentHostCalls::Capacity);
+}
+
+std::vector<std::string> GetRecentHostCalls() {
+    std::vector<std::string> calls;
+    const auto& recent = t_recent_host_calls;
+    calls.reserve(recent.count);
+
+    std::scoped_lock lock{g_host_call_names_mutex};
+    for (size_t i = 0; i < recent.count; ++i) {
+        const size_t index =
+            (recent.next + RecentHostCalls::Capacity - recent.count + i) % RecentHostCalls::Capacity;
+        const u64 wrapper = recent.wrappers[index];
+        if (const auto it = g_host_call_names.find(wrapper); it != g_host_call_names.end()) {
+            calls.push_back(it->second);
+        } else {
+            calls.push_back(fmt::format("unknown_hle_wrapper_{:#x}", wrapper));
+        }
+    }
+
+    return calls;
+}
 
 #ifdef _WIN32
 

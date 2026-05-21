@@ -13,6 +13,8 @@
 #include "common/va_ctx.h"
 #include "core/file_sys/fs.h"
 #include "core/linker.h"
+#include "core/memory.h"
+#include "core/tls.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/coredump/coredump.h"
 #include "core/libraries/kernel/debug.h"
@@ -55,6 +57,60 @@ static std::jthread service_thread;
 
 Core::EntryParams entry_params{};
 
+static void LogStackCheckAddress(std::string_view label, void* address) {
+    if (address == nullptr) {
+        LOG_CRITICAL(Lib_Kernel, "__stack_chk_fail: {}=<null>", label);
+        return;
+    }
+
+    auto* linker = Common::Singleton<Core::Linker>::Instance();
+    const auto guest_addr = reinterpret_cast<VAddr>(address);
+    const auto* module = linker ? linker->FindByAddress(guest_addr) : nullptr;
+    if (module == nullptr) {
+        LOG_CRITICAL(Lib_Kernel, "__stack_chk_fail: {}={}", label, fmt::ptr(address));
+        return;
+    }
+
+    const VAddr base = module->GetBaseAddress();
+    const auto module_name = module->name.empty() ? module->file.filename().string() : module->name;
+    LOG_CRITICAL(Lib_Kernel,
+                 "__stack_chk_fail: {}={} module={} base={:#x} offset={:#x} size={:#x}", label,
+                 fmt::ptr(address), module_name, base, guest_addr - base,
+                 module->aligned_base_size);
+}
+
+[[gnu::noinline]] static void LogStackCheckFailure() {
+#if defined(__x86_64__)
+    VAddr stack_pointer = 0;
+    asm volatile("mov %%rsp, %0" : "=r"(stack_pointer));
+
+    LOG_CRITICAL(Lib_Kernel, "__stack_chk_fail: guest_rsp={:#x}", stack_pointer);
+
+    constexpr size_t StackWordsToDump = 16;
+    auto* memory = Core::Memory::Instance();
+    if (!memory || !memory->IsValidMapping(stack_pointer, StackWordsToDump * sizeof(VAddr))) {
+        LOG_CRITICAL(Lib_Kernel, "__stack_chk_fail: guest stack is not readable");
+        return;
+    }
+
+    const auto* stack = reinterpret_cast<const VAddr*>(stack_pointer);
+    for (size_t i = 0; i < StackWordsToDump; ++i) {
+        LogStackCheckAddress(fmt::format("guest_stack[{}]", i),
+                             reinterpret_cast<void*>(stack[i]));
+    }
+
+    const auto recent_calls = Core::GetRecentHostCalls();
+    if (!recent_calls.empty()) {
+        LOG_CRITICAL(Lib_Kernel, "__stack_chk_fail: recent HLE calls on this thread:");
+        for (size_t i = 0; i < recent_calls.size(); ++i) {
+            LOG_CRITICAL(Lib_Kernel, "__stack_chk_fail: hle_call[{}]={}", i, recent_calls[i]);
+        }
+    }
+#else
+    LOG_CRITICAL(Lib_Kernel, "__stack_chk_fail: guest-stack diagnostics unavailable");
+#endif
+}
+
 void KernelSignalRequest() {
     std::unique_lock lock{m_asio_req};
     ++asio_requests;
@@ -82,6 +138,8 @@ static void KernelServiceThread(std::stop_token stoken) {
 }
 
 static PS4_SYSV_ABI void stack_chk_fail() {
+    LogStackCheckFailure();
+    Common::Log::Flush();
     UNREACHABLE();
 }
 

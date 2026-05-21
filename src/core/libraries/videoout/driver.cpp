@@ -113,8 +113,8 @@ void VideoOutDriver::Close(s32 handle) {
     // Clear port information
     std::memset(main_port.buffer_labels.data(), 0, sizeof(main_port.buffer_labels));
     std::memset(main_port.groups.data(), 0, sizeof(main_port.groups));
-    std::memset(&main_port.flip_status, 0, sizeof(main_port.flip_status));
     std::memset(&main_port.vblank_status, 0, sizeof(main_port.vblank_status));
+    main_port.flip_status = FlipStatus{};
 
     // Re-initialize buffers
     std::memset(main_port.buffer_slots.data(), 0, sizeof(main_port.buffer_slots));
@@ -122,9 +122,26 @@ void VideoOutDriver::Close(s32 handle) {
         buffer.group_index = -1;
     }
 
-    // TODO: Remove events?
-    ASSERT(main_port.flip_events.empty());
-    ASSERT(main_port.vblank_events.empty());
+    {
+        std::scoped_lock port_lock{main_port.port_mutex};
+        for (auto event : main_port.flip_events) {
+            auto* equeue = Kernel::GetEqueue(event);
+            if (equeue != nullptr) {
+                equeue->RemoveEvent(static_cast<u64>(OrbisVideoOutInternalEventId::Flip),
+                                    Kernel::OrbisKernelEvent::Filter::VideoOut);
+            }
+        }
+        main_port.flip_events.clear();
+
+        for (auto event : main_port.vblank_events) {
+            auto* equeue = Kernel::GetEqueue(event);
+            if (equeue != nullptr) {
+                equeue->RemoveEvent(static_cast<u64>(OrbisVideoOutInternalEventId::Vblank),
+                                    Kernel::OrbisKernelEvent::Filter::VideoOut);
+            }
+        }
+        main_port.vblank_events.clear();
+    }
 }
 
 VideoOutPort* VideoOutDriver::GetPort(int handle) {
@@ -334,14 +351,15 @@ void VideoOutDriver::Flip(const Request& req) {
     }
 
     // Trigger flip events for the port.
-    std::vector<Kernel::EqueueInternal*> flip_events;
+    std::vector<Kernel::OrbisKernelEqueue> flip_events;
     {
         std::scoped_lock lock{port->port_mutex};
         flip_events = port->flip_events;
     }
-    for (auto& event : flip_events) {
-        if (event != nullptr) {
-            event->TriggerEvent(
+    for (auto event : flip_events) {
+        auto* equeue = Kernel::GetEqueue(event);
+        if (equeue != nullptr) {
+            equeue->TriggerEvent(
                 static_cast<u64>(OrbisVideoOutInternalEventId::Flip),
                 Kernel::OrbisKernelEvent::Filter::VideoOut,
                 reinterpret_cast<void*>(static_cast<u64>(OrbisVideoOutInternalEventId::Flip) |
@@ -477,7 +495,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         }
 
         {
-            std::vector<Kernel::EqueueInternal*> vblank_events;
+            std::vector<Kernel::OrbisKernelEqueue> vblank_events;
             {
                 std::scoped_lock lock{main_port.port_mutex};
                 vblank_events = main_port.vblank_events;
@@ -487,13 +505,15 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
             std::scoped_lock lock{main_port.vo_mutex};
 
             // Trigger flip events for the port
-            for (auto& event : vblank_events) {
-                if (event != nullptr) {
-                    event->TriggerEvent(static_cast<u64>(OrbisVideoOutInternalEventId::Vblank),
-                                        Kernel::OrbisKernelEvent::Filter::VideoOut,
-                                        reinterpret_cast<void*>(
-                                            static_cast<u64>(OrbisVideoOutInternalEventId::Vblank) |
-                                            (vblank_status.count << 16)));
+            for (auto event : vblank_events) {
+                auto* equeue = Kernel::GetEqueue(event);
+                if (equeue != nullptr) {
+                    equeue->TriggerEvent(
+                        static_cast<u64>(OrbisVideoOutInternalEventId::Vblank),
+                        Kernel::OrbisKernelEvent::Filter::VideoOut,
+                        reinterpret_cast<void*>(
+                            static_cast<u64>(OrbisVideoOutInternalEventId::Vblank) |
+                            (vblank_status.count << 16)));
                 }
             }
 

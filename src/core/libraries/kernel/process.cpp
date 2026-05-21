@@ -14,6 +14,32 @@
 
 namespace Libraries::Kernel {
 
+struct OrbisTimeval {
+    s64 tv_sec;
+    s64 tv_usec;
+};
+static_assert(sizeof(OrbisTimeval) == 0x10);
+
+struct OrbisRusage {
+    OrbisTimeval ru_utime;
+    OrbisTimeval ru_stime;
+    s64 ru_maxrss;
+    s64 ru_ixrss;
+    s64 ru_idrss;
+    s64 ru_isrss;
+    s64 ru_minflt;
+    s64 ru_majflt;
+    s64 ru_nswap;
+    s64 ru_inblock;
+    s64 ru_oublock;
+    s64 ru_msgsnd;
+    s64 ru_msgrcv;
+    s64 ru_nsignals;
+    s64 ru_nvcsw;
+    s64 ru_nivcsw;
+};
+static_assert(sizeof(OrbisRusage) == 0x90);
+
 s32 PS4_SYSV_ABI sceKernelIsInSandbox() {
     return 1;
 }
@@ -307,9 +333,9 @@ s32 PS4_SYSV_ABI posix_getrusage(s32 who, void* usage) {
     if (usage == nullptr) {
         return -1;
     }
-    // The guest structure is larger than the fields most titles query; a conservative zeroed
-    // snapshot is safer than the AeroLib stub returning success without touching memory.
-    std::memset(usage, 0, 256);
+    // PS4 uses the FreeBSD-style rusage layout. Writing a larger host/debug buffer here can
+    // overwrite guest stack canaries when titles pass a stack-allocated rusage.
+    std::memset(usage, 0, sizeof(OrbisRusage));
     return 0;
 }
 

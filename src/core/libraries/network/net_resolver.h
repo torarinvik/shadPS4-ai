@@ -22,7 +22,7 @@ public:
 
 private:
     struct AsyncResolution {
-        const char* hostname;
+        std::string hostname;
         OrbisNetInAddr* addr;
         int timeout;
         int retry;

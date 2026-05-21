@@ -68,7 +68,7 @@ s32 PS4_SYSV_ABI sceVideoOutAddFlipEvent(Kernel::OrbisKernelEqueue eq, s32 handl
 
     {
         std::scoped_lock lock{port->port_mutex};
-        port->flip_events.push_back(equeue);
+        port->flip_events.push_back(eq);
     }
     return ORBIS_OK;
 }
@@ -86,7 +86,7 @@ s32 PS4_SYSV_ABI sceVideoOutDeleteFlipEvent(Kernel::OrbisKernelEqueue eq, s32 ha
     equeue->RemoveEvent(handle, Kernel::OrbisKernelEvent::Filter::VideoOut);
     {
         std::scoped_lock lock{port->port_mutex};
-        const auto it = std::find(port->flip_events.begin(), port->flip_events.end(), equeue);
+        const auto it = std::find(port->flip_events.begin(), port->flip_events.end(), eq);
         if (it != port->flip_events.end()) {
             port->flip_events.erase(it);
         }
@@ -119,7 +119,7 @@ s32 PS4_SYSV_ABI sceVideoOutAddVblankEvent(Kernel::OrbisKernelEqueue eq, s32 han
 
     {
         std::scoped_lock lock{port->port_mutex};
-        port->vblank_events.push_back(equeue);
+        port->vblank_events.push_back(eq);
     }
     return ORBIS_OK;
 }
@@ -137,7 +137,7 @@ s32 PS4_SYSV_ABI sceVideoOutDeleteVblankEvent(Kernel::OrbisKernelEqueue eq, s32 
     equeue->RemoveEvent(handle, Kernel::OrbisKernelEvent::Filter::VideoOut);
     {
         std::scoped_lock lock{port->port_mutex};
-        const auto it = std::find(port->vblank_events.begin(), port->vblank_events.end(), equeue);
+        const auto it = std::find(port->vblank_events.begin(), port->vblank_events.end(), eq);
         if (it != port->vblank_events.end()) {
             port->vblank_events.erase(it);
         }
@@ -405,6 +405,17 @@ s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg, voi
         });
 
     return ORBIS_OK;
+}
+
+bool TryWriteBufferLabelAddress(VAddr address, const void* data, u64 size) {
+    if (!driver) {
+        return false;
+    }
+    auto* port = driver->GetPort(1);
+    if (port == nullptr) {
+        return false;
+    }
+    return port->TryWriteVoLabel(std::bit_cast<const void*>(address), data, size);
 }
 
 s32 PS4_SYSV_ABI sceVideoOutGetDeviceCapabilityInfo(

@@ -4,6 +4,9 @@
 #pragma once
 
 #include <cstring>
+#include <string>
+#include <string_view>
+#include <vector>
 #include "common/types.h"
 #ifdef _WIN32
 #include <malloc.h>
@@ -45,12 +48,17 @@ Tcb* GetTcbBase();
 /// Makes sure TLS is initialized for the thread before entering guest.
 void InitializeTLS();
 
+void RegisterHostCallName(u64 wrapper, std::string_view name);
+void TraceHostCall(u64 wrapper);
+std::vector<std::string> GetRecentHostCalls();
+
 template <class F, F f>
 struct HostCallWrapperImpl;
 
 template <class ReturnType, class... Args, PS4_SYSV_ABI ReturnType (*func)(Args...)>
 struct HostCallWrapperImpl<PS4_SYSV_ABI ReturnType (*)(Args...), func> {
     static ReturnType PS4_SYSV_ABI wrap(Args... args) {
+        TraceHostCall(reinterpret_cast<u64>(&wrap));
         return func(args...);
     }
 };

@@ -37,8 +37,7 @@ static bool IsSafeGuestRelativePath(std::string_view rel_path) {
     }
 
     for (const auto& component : parsed) {
-        if (component.empty() || component == "." || component == ".." ||
-            component.has_root_path()) {
+        if (component.empty() || component == ".." || component.has_root_path()) {
             return false;
         }
 #ifdef _WIN32

@@ -16,6 +16,7 @@
         sr.module = mod;                                                                           \
         sr.type = Core::Loader::SymbolType::Function;                                              \
         auto func = reinterpret_cast<u64>(HOST_CALL(function));                                    \
+        Core::RegisterHostCallName(func, #function);                                               \
         sym->AddSymbol(sr, func);                                                                  \
     }
 

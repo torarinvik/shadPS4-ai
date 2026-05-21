@@ -25,8 +25,8 @@ struct VideoOutPort {
     std::array<BufferAttributeGroup, MaxDisplayBufferGroups> groups;
     FlipStatus flip_status;
     SceVideoOutVblankStatus vblank_status;
-    std::vector<Kernel::EqueueInternal*> flip_events;
-    std::vector<Kernel::EqueueInternal*> vblank_events;
+    std::vector<Kernel::OrbisKernelEqueue> flip_events;
+    std::vector<Kernel::OrbisKernelEqueue> vblank_events;
     std::mutex vo_mutex;
     std::mutex port_mutex;
     std::condition_variable vo_cv;
@@ -48,6 +48,25 @@ struct VideoOutPort {
         const u64* start = &buffer_labels[0];
         const u64* end = &buffer_labels[MaxDisplayBuffers - 1];
         return address >= start && address <= end;
+    }
+
+    bool IsVoLabelRange(const void* address, u64 size) const {
+        if (size == 0) {
+            return true;
+        }
+        const auto begin = reinterpret_cast<uintptr_t>(buffer_labels.data());
+        const auto end = begin + sizeof(buffer_labels);
+        const auto addr = reinterpret_cast<uintptr_t>(address);
+        return addr >= begin && size <= end - addr;
+    }
+
+    bool TryWriteVoLabel(const void* address, const void* data, u64 size) {
+        if (!IsVoLabelRange(address, size)) {
+            return false;
+        }
+        std::memcpy(const_cast<void*>(address), data, size);
+        SignalVoLabel();
+        return true;
     }
 
     void WaitVoLabel(auto&& pred) {

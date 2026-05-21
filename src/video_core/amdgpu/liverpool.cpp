@@ -14,6 +14,7 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/process.h"
 #include "core/libraries/videoout/driver.h"
+#include "core/libraries/videoout/video_out.h"
 #include "core/memory.h"
 #include "core/platform.h"
 #include "video_core/amdgpu/liverpool.h"
@@ -40,6 +41,9 @@ static bool SafePm4Write(VAddr address, const void* data, u32 num_bytes, std::st
         return true;
     }
     if (!memory->IsValidMapping(address, num_bytes)) {
+        if (Libraries::VideoOut::TryWriteBufferLabelAddress(address, data, num_bytes)) {
+            return true;
+        }
         LOG_ERROR(Render, "{} invalid PM4 write address={:#x} size={}", context, address,
                   num_bytes);
         return false;
@@ -877,7 +881,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             case PM4ItOpcode::WaitRegMem: {
                 const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
                 // ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
+                const u64* wait_addr = wait_reg_mem->Address<u64*>();
+                const bool is_vo_label = vo_port != nullptr && vo_port->IsVoLabel(wait_addr);
                 if (wait_reg_mem->mem_space.Value() == PM4CmdWaitRegMem::MemSpace::Memory &&
+                    !is_vo_label &&
                     !Core::Memory::Instance()->IsValidMapping(wait_reg_mem->Address<VAddr>(),
                                                               sizeof(u32))) {
                     LOG_ERROR(Render, "Graphics WaitRegMem invalid poll address={:#x}",
@@ -888,9 +895,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 // will write to the label when presentation is finished. So if
                 // there are no other submits to yield to we can sleep the thread
                 // instead and allow other tasks to run.
-                const u64* wait_addr = wait_reg_mem->Address<u64*>();
-                if (vo_port->IsVoLabel(wait_addr) &&
-                    num_submits == mapped_queues[GfxQueueId].submits.size()) {
+                if (is_vo_label && num_submits == mapped_queues[GfxQueueId].submits.size()) {
                     vo_port->WaitVoLabel([&] { return wait_reg_mem->Test(regs.reg_array); });
                     break;
                 }
