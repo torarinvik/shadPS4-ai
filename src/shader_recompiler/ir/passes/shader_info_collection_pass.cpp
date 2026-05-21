@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "core/emulator_settings.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/profile.h"
-#include "video_core/buffer_cache/buffer_cache.h"
 
 namespace Shader::Optimization {
+
+// Keep the temporary Elisa shader bridge from depending on the full Vulkan buffer cache just for
+// VideoCore::BufferCache::BDA_PAGETABLE_SIZE.
+static constexpr u64 BridgeBdaPageTableSize = (u64{1} << (40 - 14)) * sizeof(u64);
 
 void Visit(Info& info, const IR::Inst& inst) {
     switch (inst.GetOpcode()) {
@@ -162,15 +164,10 @@ void CollectShaderInfoPass(IR::Program& program, const Profile& profile) {
         }
     }
 
-    if (!EmulatorSettings.IsDirectMemoryAccessEnabled()) {
-        info.uses_dma = false;
-        info.readconst_types = Info::ReadConstType::None;
-    }
-
     if (info.uses_dma) {
         info.buffers.push_back({
             .used_types = IR::Type::U64,
-            .inline_cbuf = AmdGpu::Buffer::Placeholder(VideoCore::BufferCache::BDA_PAGETABLE_SIZE),
+            .inline_cbuf = AmdGpu::Buffer::Placeholder(BridgeBdaPageTableSize),
             .buffer_type = BufferType::BdaPagetable,
             .is_written = true,
         });

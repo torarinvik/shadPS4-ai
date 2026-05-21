@@ -1,9 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "common/io_file.h"
-#include "common/path_util.h"
-#include "core/emulator_settings.h"
 #include "core/libraries/kernel/process.h"
 #include "shader_recompiler/frontend/decode.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
@@ -20,6 +17,11 @@
 #include <magic_enum/magic_enum.hpp>
 
 namespace Shader::Gcn {
+
+template <typename Enum>
+constexpr auto ToUnderlying(Enum value) {
+    return static_cast<std::underlying_type_t<Enum>>(value);
+}
 
 static IR::VectorReg IterateBarycentrics(const RuntimeInfo& runtime_info, auto&& set_attribute) {
     if (runtime_info.stage != Stage::Fragment) {
@@ -370,24 +372,22 @@ T Translator::GetSrc(const InstOperand& operand) {
         }
         break;
     default:
-        if (const u32 field = std::to_underlying(operand.field);
-            field > std::to_underlying(OperandField::VccHi) &&
-            field < std::to_underlying(OperandField::M0)) {
+        if (const u32 field = ToUnderlying(operand.field);
+            field > ToUnderlying(OperandField::VccHi) && field < ToUnderlying(OperandField::M0)) {
             LOG_WARNING(Render_Recompiler,
                         "Unsupported special scalar operand field {} code {}; using zero",
                         field, operand.code);
             value = get_imm(0u);
             break;
         }
-        if (const u32 field = std::to_underlying(operand.field);
-            field < OperandFieldRange::VectorGPRMin) {
+        if (const u32 field = ToUnderlying(operand.field); field < OperandFieldRange::VectorGPRMin) {
             LOG_WARNING(Render_Recompiler,
                         "Unsupported scalar/immediate operand field {} code {}; using zero",
                         field, operand.code);
             value = get_imm(0u);
             break;
         }
-        UNREACHABLE_MSG("unexpected operand: {}", std::to_underlying(operand.field));
+        UNREACHABLE_MSG("unexpected operand: {}", ToUnderlying(operand.field));
     }
 
     if constexpr (is_float) {
@@ -530,7 +530,7 @@ T Translator::GetSrc16(const InstOperand& operand) {
         UNREACHABLE();
         break;
     default:
-        UNREACHABLE_MSG("unexpected operand: {}", std::to_underlying(operand.field));
+        UNREACHABLE_MSG("unexpected operand: {}", ToUnderlying(operand.field));
     }
 
     if constexpr (is_float) {
@@ -658,7 +658,7 @@ IR::F32 Translator::GetSrcMix(const InstOperand& operand) {
         UNREACHABLE_MSG("unhandled DPP");
         break;
     default:
-        UNREACHABLE_MSG("unexpected operand: {}", std::to_underlying(operand.field));
+        UNREACHABLE_MSG("unexpected operand: {}", ToUnderlying(operand.field));
     }
 
     if (operand.input_modifier.neg_hi) {
@@ -888,7 +888,7 @@ pk_type<T> Translator::GetSrcPk(const InstOperand& operand) {
         value = extract(ir.GetVccLo());
         break;
     default:
-        UNREACHABLE_MSG("unexpected operand: {}", std::to_underlying(operand.field));
+        UNREACHABLE_MSG("unexpected operand: {}", ToUnderlying(operand.field));
     }
 
     if constexpr (is_float) {
@@ -953,8 +953,8 @@ void Translator::SetDst(const InstOperand& operand, const IR::U32F32& value) {
         return ir.SetM0(result);
     default:
         UNREACHABLE_MSG("unexpected destination operand: field={}({}) type={} code={}",
-                        magic_enum::enum_name(operand.field), std::to_underlying(operand.field),
-                        std::to_underlying(operand.type), operand.code);
+                        magic_enum::enum_name(operand.field), ToUnderlying(operand.field),
+                        ToUnderlying(operand.type), operand.code);
     }
 }
 
@@ -1122,18 +1122,6 @@ void Translator::EmitFetch(const GcnInst& inst) {
 
     const auto fetch_data = ParseFetchShader(info);
     ASSERT(fetch_data.has_value());
-
-    if (EmulatorSettings.IsDumpShaders()) {
-        using namespace Common::FS;
-        const auto dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
-        if (!std::filesystem::exists(dump_dir)) {
-            std::filesystem::create_directories(dump_dir);
-        }
-        const auto filename = fmt::format("vs_{:#018x}.fetch.bin", info.pgm_hash);
-        const auto file = IOFile{dump_dir / filename, FileAccessMode::Create};
-        const auto* code = GetFetchShaderCode(info, code_sgpr_base);
-        file.WriteRaw<u8>(code, fetch_data->size);
-    }
 
     for (const auto& attrib : fetch_data->attributes) {
         const IR::Attribute attr{IR::Attribute::Param0 + attrib.semantic};

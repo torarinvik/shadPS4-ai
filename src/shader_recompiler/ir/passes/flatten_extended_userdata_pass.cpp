@@ -5,11 +5,8 @@
 #include <boost/container/flat_map.hpp>
 #include <xbyak/xbyak.h>
 #include <xbyak/xbyak_util.h>
-#include "common/io_file.h"
 #include "common/logging/log.h"
-#include "common/path_util.h"
 #include "common/signal_context.h"
-#include "core/emulator_settings.h"
 #include "core/signals.h"
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/ir/breadth_first_search.h"
@@ -39,33 +36,6 @@ PFN_SrtWalker RegisterWalkerCode(const u8* ptr, size_t size) {
 } // namespace Shader
 
 namespace {
-
-static void DumpSrtProgram(const Shader::Info& info, const u8* code, size_t codesize) {
-#ifdef ARCH_X86_64
-    using namespace Common::FS;
-
-    const auto dump_dir = GetUserPath(PathType::ShaderDir) / "dumps";
-    if (!std::filesystem::exists(dump_dir)) {
-        std::filesystem::create_directories(dump_dir);
-    }
-    const auto filename = fmt::format("{}_{:#018x}.srtprogram.txt", info.stage, info.pgm_hash);
-    const auto file = IOFile{dump_dir / filename, FileAccessMode::Create, FileType::TextFile};
-
-    u64 address = reinterpret_cast<u64>(code);
-    u64 code_end = address + codesize;
-    ZydisDecodedInstruction instruction;
-    ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-    ZyanStatus status = ZYAN_STATUS_SUCCESS;
-    while (address < code_end && ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(
-                                     instruction, operands, reinterpret_cast<void*>(address)))) {
-        std::string s =
-            Common::Decoder::Instance()->disassembleInst(instruction, operands, address);
-        s += "\n";
-        file.WriteString(s);
-        address += instruction.length;
-    }
-#endif
-}
 
 static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
     // Only handle if the fault address is within the SRT code range
@@ -227,11 +197,6 @@ static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
 
     info.srt_info.walker_func_size =
         c.getCurr() - reinterpret_cast<const u8*>(info.srt_info.walker_func);
-
-    if (EmulatorSettings.IsDumpShaders()) {
-        DumpSrtProgram(info, reinterpret_cast<const u8*>(info.srt_info.walker_func),
-                       info.srt_info.walker_func_size);
-    }
 
     info.srt_info.flattened_bufsize_dw = pass_info.dst_off_dw;
 }
