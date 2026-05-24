@@ -176,11 +176,11 @@ Sorted by approximate PS4 storage size, largest to smallest. Sizes are rough and
 | [ ] | 60 | The Last of Us™ Remastered |
 | [ ] | 55 | Star Wars Jedi: Fallen Order™ |
 | [ ] | 55 | DEATH STRANDING |
-| [ ] | 55 | Tiny Tina's Wonderlands |
-| [ ] | 55 | Destiny |
-| [ ] | 55 | Call of Duty®: Advanced Warfare |
-| [ ] | 52 | Marvel's Spider-Man: Miles Morales |
-| [ ] | 50 | Battlefield™ 1 |
+| [X ] | 24.1 | Tiny Tina's Wonderlands |
+| [Unavailable ] | ? | Destiny |
+| [ X] | 65.4 | Call of Duty®: Advanced Warfare |
+| [Unavailable ] | ? | Marvel's Spider-Man: Miles Morales |
+| [ X] | 38.9 | Battlefield™ 1 |
 | [X ] | 39.4 | Battlefield™ Hardline |
 | [ Unavailable] | ? | Ghost of Tsushima |
 | [ Unavailable] | ? | Uncharted™ 4: A Thief’s End |
