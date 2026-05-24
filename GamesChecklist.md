@@ -181,42 +181,42 @@ Sorted by approximate PS4 storage size, largest to smallest. Sizes are rough and
 | [ ] | 55 | Call of Duty®: Advanced Warfare |
 | [ ] | 52 | Marvel's Spider-Man: Miles Morales |
 | [ ] | 50 | Battlefield™ 1 |
-| [ ] | 50 | Battlefield™ Hardline |
-| [ ] | 50 | Ghost of Tsushima |
-| [ ] | 50 | Uncharted™ 4: A Thief’s End |
-| [ ] | 50 | Madden NFL 20 |
-| [ ] | 50 | The Quarry |
-| [ ] | 50 | The Witcher 3: Wild Hunt – Game of the Year Edition |
-| [ ] | 50 | MLB® The Show™ 19 |
-| [ ] | 45 | God of War |
-| [ ] | 45 | Horizon Zero Dawn™ |
-| [ ] | 45 | Uncharted: The Lost Legacy™ |
-| [ ] | 45 | Uncharted: The Nathan Drake Collection™ |
-| [ ] | 45 | Detroit: Become Human™ |
-| [ ] | 45 | KINGDOM HEARTS III |
-| [ ] | 45 | Madden NFL 19 |
-| [ ] | 43 | NBA 2K14 |
+| [X ] | 39.4 | Battlefield™ Hardline |
+| [ Unavailable] | ? | Ghost of Tsushima |
+| [ Unavailable] | ? | Uncharted™ 4: A Thief’s End |
+| [X ] | 30.5 | The Quarry |
+| [ Unavailable] | ? | The Witcher 3: Wild Hunt – Game of the Year Edition |
+| [ Unavailable] | ? | MLB® The Show™ 19 |
+| [ Unavailable] | ? | God of War |
+| [ Unavailable] | ? | Horizon Zero Dawn™ |
+| [ Unavailable] | ? | Uncharted: The Lost Legacy™ |
+| [ X] | 40.5 | Uncharted: The Nathan Drake Collection™ |
+| [ X] | 39.4 | Detroit: Become Human™ |
+| [ Unavailable] | ? | KINGDOM HEARTS III |
+| [ Unavailable] | ? | NBA 2K14 |
+| [X] | 48.0 | NBA 2K26 |
+| [X] | 47.0 | NBA 2K25 |
 | [x] | 41.2 | SWORD ART ONLINE Alicization Lycoris |
 | [ ] | 40 | Call of Duty®: Modern Warfare® Remastered |
-| [ ] | 40 | Dishonored 2 |
-| [ ] | 40 | Prey |
-| [ ] | 40 | RESIDENT EVIL RESISTANCE |
-| [ ] | 39 | KILLZONE™ SHADOW FALL |
+| [X ] | 36.2 | Dishonored 2 |
+| [X ] | 35.9 | Prey |
+| [ Unavailable ] | ? | RESIDENT EVIL RESISTANCE |
+| [ X] | 39.3 | KILLZONE™ SHADOW FALL |
 | [x] | 37.2 | KNACK 2 |
 | [Unavailable] | 36.5 | Fallout 4 |
-| [ ] | 35 | Until Dawn™ |
-| [ ] | 35 | South Park™: The Fractured But Whole™ |
-| [ ] | 35 | HITMAN™ 2 |
-| [ ] | 35 | Earth Defense Force 4.1: The Shadow of New Despair |
-| [ ] | 32 | Crash Bandicoot™ 4: It’s About Time |
+| [ Unavailable ] | ? | Until Dawn™ |
+| [ X] | 35 | South Park™: The Fractured But Whole™ |
+| [ X] | 35 | HITMAN™ 2 |
+| [ X] | 5.47 | Earth Defense Force 4.1: The Shadow of New Despair |
+| [ X] | 32 | Crash Bandicoot™ 4: It’s About Time |
 | [x] | 30.1 | Sniper Elite 4 |
-| [ ] | 30 | Madden NFL 16 |
-| [ ] | 30 | Just Cause 3 |
-| [ ] | 30 | Sniper Ghost Warrior 3 |
-| [ ] | 30 | SCARLET NEXUS |
-| [ ] | 30 | Spyro Reignited Trilogy |
-| [ ] | 28 | MediEvil |
-| [ ] | 28 | Concrete Genie |
+| [ Unavailable ] | ? | Madden NFL 16 |
+| [ X] | 30 | Just Cause 3 |
+| [Unavailable ] | 11.3 | Sniper Ghost Warrior 3 |
+| [ X] | 30 | SCARLET NEXUS |
+| [ X] | 30 | Spyro Reignited Trilogy |
+| [X ] | 28 | MediEvil |
+| [? ] | 28 | Concrete Genie |
 | [X ] | 25.7 | Diablo III: Reaper of Souls – Ultimate Evil Edition |
 | [ Unavailable ] | ? | Ratchet & Clank™ |
 | [ X] | 21.6 | RESIDENT EVIL 2 |
@@ -238,6 +238,8 @@ Sorted by approximate PS4 storage size, largest to smallest. Sizes are rough and
 | [x] | 220 mb | Prison architect |
 | [x] | ? | Madden NFL 24 |
 | [x] | ? | Madden NFL 25 |
+| [ Unavailable] | ? | Madden NFL 19 |
+| [ Unavailable] | ? | Madden NFL 20 |
 | [x] | ? | Final Fantasy X/X-2 HD Remaster |
 | [Unavailable] | ? | Overwatch: Origins Edition |
 | [Unavailable] | ? | HORROR TALES: The Wine |
