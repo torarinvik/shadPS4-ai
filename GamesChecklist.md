@@ -173,9 +173,9 @@ Sorted by approximate PS4 storage size, largest to smallest. Sizes are rough and
 | [ ] | 70 | Marvel's Guardians of the Galaxy |
 | [ ] | 70 | OUTRIDERS |
 | [ ] | 65 | Marvel's Spider-Man |
-| [ ] | 60 | The Last of Us™ Remastered |
-| [ ] | 55 | Star Wars Jedi: Fallen Order™ |
-| [ ] | 55 | DEATH STRANDING |
+| [Unavailable ] | ? | The Last of Us™ Remastered |
+| [ X] | 44.4 | Star Wars Jedi: Fallen Order™ |
+| [ X] | 44.7 | DEATH STRANDING |
 | [X ] | 24.1 | Tiny Tina's Wonderlands |
 | [Unavailable ] | ? | Destiny |
 | [ X] | 65.4 | Call of Duty®: Advanced Warfare |
