@@ -349,6 +349,19 @@ void Linker::Relocate(Module* module) {
                     module->SetRelaBit(bit_idx);
                 }
                 symbol_virtual_addr = symrec.virtual_address;
+                // Boot oracle: record import resolution (NID/type/resolved) for the
+                // Elisa port diff. Resolved *addresses* are not cross-comparable
+                // (host HLE vs guest thunk), so only structural facts are emitted.
+                {
+                    const auto hpos = rel_name.find('#');
+                    const std::string nid =
+                        hpos == std::string::npos ? rel_name : rel_name.substr(0, hpos);
+                    const char* st = rel_sym_type == Loader::SymbolType::Function ? "function"
+                                     : rel_sym_type == Loader::SymbolType::Object ? "object"
+                                                                                  : "notype";
+                    LOG_INFO(Core_Linker, "BOOT_ORACLE resolve nid={} symtype={} resolved={}", nid,
+                             st, symbol_virtual_addr != 0 ? 1 : 0);
+                }
                 break;
             }
             default:
