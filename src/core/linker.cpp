@@ -184,6 +184,9 @@ void Linker::Execute(const std::vector<std::string>& args) {
 
         // Run the game's entry function
         params.entry_addr = module->GetEntryAddress();
+        // Boot oracle: emit entry facts for diffing against the Elisa port.
+        LOG_INFO(Core_Linker, "BOOT_ORACLE entry entry={:#x} argc={}", params.entry_addr,
+                 params.argc);
         RunMainEntry(&params);
     });
 }
@@ -204,6 +207,15 @@ s32 Linker::LoadModule(const std::filesystem::path& elf_name, bool is_dynamic) {
 
     num_static_modules += !is_dynamic;
     m_modules.emplace_back(std::move(module));
+
+    // Boot oracle: emit module-layout facts for diffing against the Elisa port.
+    // See docs/shadps4_boot_oracle.md in the elisa-shad-ps4-from-scratch tree.
+    {
+        const auto* loaded = m_modules.back().get();
+        LOG_INFO(Core_Linker, "BOOT_ORACLE module index={} module={} base={:#x} size={:#x}",
+                 m_modules.size() - 1, elf_name.filename().string(), loaded->GetBaseAddress(),
+                 loaded->aligned_base_size);
+    }
 
     Core::Devtools::Widget::ModuleList::AddModule(elf_name.filename().string(), elf_name);
 
