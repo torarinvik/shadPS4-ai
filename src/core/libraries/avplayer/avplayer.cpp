@@ -7,6 +7,8 @@
 #include "core/libraries/avplayer/avplayer_impl.h"
 #include "core/libraries/libs.h"
 
+#include <string_view>
+
 namespace Libraries::AvPlayer {
 
 s32 PS4_SYSV_ABI sceAvPlayerAddSource(AvPlayerHandle handle, const char* filename) {

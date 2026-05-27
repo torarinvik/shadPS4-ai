@@ -8,8 +8,9 @@
 #include "core/libraries/avplayer/avplayer_file_streamer.h"
 
 extern "C" {
-#include <libavformat/avformat.h>
 #include <libavformat/avio.h>
+#include <libavutil/error.h>
+#include <libavutil/mem.h>
 }
 
 constexpr u32 AVPLAYER_AVIO_BUFFER_SIZE = 4096;
