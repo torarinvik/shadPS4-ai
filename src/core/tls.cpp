@@ -3,11 +3,13 @@
 
 #include <mutex>
 #include <array>
+#include <atomic>
 #include <cstdlib>
 #include <unordered_map>
 #include <fmt/format.h>
 #include "common/arch.h"
 #include "common/assert.h"
+#include "common/logging/log.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/tls.h"
 
@@ -32,8 +34,16 @@
 
 namespace Core {
 
+struct HostCallInfo {
+    std::string name;
+    std::string nid;
+    std::string library;
+    std::string module;
+};
+
 static std::mutex g_host_call_names_mutex;
-static std::unordered_map<u64, std::string> g_host_call_names;
+static std::unordered_map<u64, HostCallInfo> g_host_call_names;
+static std::atomic<u64> g_host_call_trace_seq{0};
 
 static bool TraceHleCallsEnabled() {
     static const bool enabled = std::getenv("SHADPS4_TRACE_HLE_CALLS") != nullptr;
@@ -49,12 +59,18 @@ struct RecentHostCalls {
 
 static thread_local RecentHostCalls t_recent_host_calls;
 
-void RegisterHostCallName(u64 wrapper, std::string_view name) {
+void RegisterHostCallName(u64 wrapper, std::string_view name, std::string_view nid,
+                          std::string_view library, std::string_view module) {
     std::scoped_lock lock{g_host_call_names_mutex};
-    g_host_call_names.try_emplace(wrapper, name);
+    g_host_call_names.try_emplace(wrapper, HostCallInfo{
+                                               .name = std::string{name},
+                                               .nid = std::string{nid},
+                                               .library = std::string{library},
+                                               .module = std::string{module},
+                                           });
 }
 
-void TraceHostCall(u64 wrapper) {
+void TraceHostCall(u64 wrapper, const std::array<u64, 3>& args, u64 return_address) {
     if (!TraceHleCallsEnabled()) {
         return;
     }
@@ -63,6 +79,23 @@ void TraceHostCall(u64 wrapper) {
     recent.wrappers[recent.next] = wrapper;
     recent.next = (recent.next + 1) % RecentHostCalls::Capacity;
     recent.count = std::min(recent.count + 1, RecentHostCalls::Capacity);
+
+    HostCallInfo info;
+    {
+        std::scoped_lock lock{g_host_call_names_mutex};
+        if (const auto it = g_host_call_names.find(wrapper); it != g_host_call_names.end()) {
+            info = it->second;
+        }
+    }
+
+    const u64 seq = g_host_call_trace_seq.fetch_add(1, std::memory_order_relaxed) + 1;
+    const auto symbol = info.name.empty() ? fmt::format("unknown_hle_wrapper_{:#x}", wrapper)
+                                          : info.name;
+    LOG_INFO(Core_Linker,
+             "BOOT_ORACLE hle seq={} module={} library={} symbol={} nid={} wrapper={:#x} "
+             "return={:#x} rdi={:#x} rsi={:#x} rdx={:#x}",
+             seq, info.module, info.library, symbol, info.nid, wrapper, return_address, args[0],
+             args[1], args[2]);
 }
 
 std::vector<std::string> GetRecentHostCalls() {
@@ -76,7 +109,7 @@ std::vector<std::string> GetRecentHostCalls() {
             (recent.next + RecentHostCalls::Capacity - recent.count + i) % RecentHostCalls::Capacity;
         const u64 wrapper = recent.wrappers[index];
         if (const auto it = g_host_call_names.find(wrapper); it != g_host_call_names.end()) {
-            calls.push_back(it->second);
+            calls.push_back(it->second.name);
         } else {
             calls.push_back(fmt::format("unknown_hle_wrapper_{:#x}", wrapper));
         }
