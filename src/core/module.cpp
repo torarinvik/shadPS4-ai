@@ -98,6 +98,8 @@ Module::~Module() = default;
 
 s32 Module::Start(u64 args, const void* argp, void* param) {
     LOG_INFO(Core_Linker, "Module started : {}", name);
+    LOG_INFO(Core_Linker, "BOOT_ORACLE modstart phase=begin module={} base={:#x} args={:#x}",
+             name, GetBaseAddress(), args);
     const auto call_init_array = [this](std::string_view label, VAddr array_virtual_addr,
                                         u64 array_size) {
         if (array_virtual_addr == 0 || array_size == 0) {
@@ -112,11 +114,18 @@ s32 Module::Start(u64 args, const void* argp, void* param) {
         const auto* entries = reinterpret_cast<const VAddr*>(array_addr);
         const u64 count = array_size / sizeof(VAddr);
         LOG_INFO(Core_Linker, "{} calling {} entries: {}", name, label, count);
+        LOG_INFO(Core_Linker,
+                 "BOOT_ORACLE modstart phase=init-array module={} label={} array={:#x} count={}",
+                 name, label, array_addr, count);
         for (u64 i = 0; i < count; i++) {
             const VAddr func_addr = entries[i];
             if (func_addr == 0 || func_addr == static_cast<VAddr>(-1)) {
                 continue;
             }
+            LOG_INFO(Core_Linker,
+                     "BOOT_ORACLE modstart phase=init-array-entry module={} label={} index={} "
+                     "entry={:#x}",
+                     name, label, i, func_addr);
             reinterpret_cast<InitArrayFunc>(func_addr)();
         }
     };
@@ -127,15 +136,20 @@ s32 Module::Start(u64 args, const void* argp, void* param) {
     s32 ret = 0;
     if (dynamic_info.init_virtual_addr != 0) {
         const VAddr addr = dynamic_info.init_virtual_addr + GetBaseAddress();
+        LOG_INFO(Core_Linker, "BOOT_ORACLE modstart phase=dt-init module={} entry={:#x}", name,
+                 addr);
         ret = reinterpret_cast<EntryFunc>(addr)(args, argp, param);
     } else if (IsSharedLib() && !IsSystemLib()) {
         const VAddr addr = GetEntryAddress();
         LOG_INFO(Core_Linker, "{} using ELF entry fallback for module_start at {:#x}", name, addr);
+        LOG_INFO(Core_Linker, "BOOT_ORACLE modstart phase=elf-entry-fallback module={} entry={:#x}",
+                 name, addr);
         ret = reinterpret_cast<EntryFunc>(addr)(args, argp, param);
     }
 
     call_init_array("DT_INIT_ARRAY", dynamic_info.init_array_virtual_addr,
                     dynamic_info.init_array_size);
+    LOG_INFO(Core_Linker, "BOOT_ORACLE modstart phase=end module={} ret={}", name, ret);
     return ret;
 }
 
