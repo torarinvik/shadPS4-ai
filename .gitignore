@@ -434,3 +434,5 @@ cppcheck-report.txt
 codeql-results.csv
 clang-tidy-report.txt
 /infer-out
+/externals/ext-libusb
+/externals/sdl3_mixer
