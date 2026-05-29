@@ -100,6 +100,17 @@ void Linker::Execute(const std::vector<std::string>& args) {
         LOG_WARNING(Core_Linker, "EBOOT has no PT_SCE_PROCPARAM; using default process params");
     }
 
+    // BOOT_ORACLE: dump the sceLibcParam header words so the Elisa port can diff
+    // the guest-visible libc_param contents (heap-init divergence).
+    LOG_INFO(Core_Linker, "BOOT_ORACLE libc_param addr={:#x}",
+             reinterpret_cast<u64>(proc_param->libc_param));
+    if (proc_param->libc_param != nullptr) {
+        const u64* lcp = reinterpret_cast<const u64*>(proc_param->libc_param);
+        for (u64 i = 0; i < 16; ++i) {
+            LOG_INFO(Core_Linker, "BOOT_ORACLE libcparam_word index={} value={:#x}", i, lcp[i]);
+        }
+    }
+
     Core::OrbisKernelMemParam mem_param{};
     if (proc_param->size >= offsetof(OrbisProcParam, mem_param) + sizeof(OrbisKernelMemParam*)) {
         if (proc_param->mem_param) {
