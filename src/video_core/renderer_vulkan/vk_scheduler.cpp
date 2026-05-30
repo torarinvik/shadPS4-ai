@@ -128,7 +128,16 @@ void Scheduler::Wait(u64 tick) {
 
 void Scheduler::PopPendingOperations() {
     master_semaphore.Refresh();
-    while (!pending_ops.empty() && master_semaphore.IsFree(pending_ops.front().gpu_tick)) {
+    const u64 current_tick = master_semaphore.CurrentTick();
+    while (!pending_ops.empty() &&
+           // The op's tick must have actually been submitted. current_tick only advances
+           // at submit, so an op whose gpu_tick == current_tick still belongs to the open,
+           // not-yet-submitted command buffer; running its destructor now would free a GPU
+           // resource the recording still references (MoltenVK kIOGPU Invalid Resource /
+           // device loss). Requiring gpu_tick < current_tick guarantees the recording that
+           // owns the resource has been submitted before we reclaim it.
+           pending_ops.front().gpu_tick < current_tick &&
+           master_semaphore.IsFree(pending_ops.front().gpu_tick)) {
         pending_ops.front().callback();
         pending_ops.pop();
     }
