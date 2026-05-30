@@ -1121,6 +1121,24 @@ void TextureCache::RefreshImage(Image& image) {
     const bool is_gpu_modified = True(image.flags & ImageFlagBits::GpuModified);
     const bool is_gpu_dirty = True(image.flags & ImageFlagBits::GpuDirty);
 
+    // Skip CPU re-upload of a format-substituted depth-stencil surface. Metal lacks D16S8 so
+    // MoltenVK substitutes a larger host format (e.g. D32SfloatS8Uint); the source buffer is
+    // sized for the guest depth format but Metal's copyBufferToImage computes the required source
+    // size from the larger host format and over-reads the buffer ("totalBytesUsed must be <=
+    // sourceBuffer length"), faulting the command buffer with Invalid Resource (device loss; UFC 3
+    // loading->menu transition). Gated to CPU-dirty (non-GPU-modified) depth images, which is the
+    // abnormal case caused by depth/color memory aliasing — normal GPU-rendered depth targets are
+    // GpuModified and unaffected. The guest tiled depth bytes don't match the host layout anyway,
+    // so this upload would be meaningless even without the overflow; keep the GPU content.
+    if (image.info.props.is_depth && !is_gpu_modified) {
+        const vk::Format host_format =
+            instance.GetSupportedFormat(image.info.pixel_format, image.format_features);
+        if (host_format != image.info.pixel_format) {
+            image.flags &= ~ImageFlagBits::Dirty;
+            return;
+        }
+    }
+
     boost::container::small_vector<vk::BufferImageCopy, 14> image_copies;
     for (u32 m = 0; m < num_mips; m++) {
         const u32 width = std::max(image.info.size.width >> m, 1u);

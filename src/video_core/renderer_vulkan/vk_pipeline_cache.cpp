@@ -401,9 +401,22 @@ bool PipelineCache::RefreshGraphicsKey() {
 
     const bool db_enabled = regs.depth_buffer.DepthValid() || regs.depth_buffer.StencilValid();
 
-    key.z_format = regs.depth_buffer.DepthValid() ? regs.depth_buffer.z_info.format
-                                                  : AmdGpu::DepthBuffer::ZFormat::Invalid;
-    key.stencil_format = regs.depth_buffer.StencilValid()
+    // The depth/stencil attachment is bound at draw time (Rasterizer::PrepareRenderState) only
+    // when the depth or stencil TEST is enabled — not merely when the depth buffer format is
+    // valid. The pipeline's declared depth/stencil attachment formats must match that binding
+    // exactly: if the pipeline declares a depth format but no depth texture is bound, MoltenVK/
+    // Metal rejects setRenderPipelineState ("the renderPipelineState pixelFormat must be
+    // MTLPixelFormatInvalid, as no texture is set") and faults the command buffer with
+    // kIOGPUCommandBufferCallbackErrorInvalidResource (device loss). Gate the formats on the same
+    // condition the rasterizer uses to bind the attachment so the two never disagree.
+    const bool ds_attachment_bound =
+        (regs.depth_control.depth_enable && regs.depth_buffer.DepthValid()) ||
+        (regs.depth_control.stencil_enable && regs.depth_buffer.StencilValid());
+
+    key.z_format = (ds_attachment_bound && regs.depth_buffer.DepthValid())
+                       ? regs.depth_buffer.z_info.format
+                       : AmdGpu::DepthBuffer::ZFormat::Invalid;
+    key.stencil_format = (ds_attachment_bound && regs.depth_buffer.StencilValid())
                              ? regs.depth_buffer.stencil_info.format
                              : AmdGpu::DepthBuffer::StencilFormat::Invalid;
     key.depth_clamp_enable = !regs.depth_render_override.disable_viewport_clamp;
