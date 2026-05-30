@@ -4,6 +4,7 @@
 #pragma once
 
 #include <unordered_map>
+#include <vector>
 #include "common/types.h"
 #include "video_core/amdgpu/tiling.h"
 #include "video_core/buffer_cache/buffer.h"
@@ -50,6 +51,12 @@ public:
 
     Result DetileImage(vk::Buffer in_buffer, u32 in_offset, const ImageInfo& info);
 
+    /// Defer-destroys scratch buffers produced by the most recent tile/detile operations.
+    /// Must be called by the caller AFTER the command that consumes the scratch buffer
+    /// (e.g. image.Upload) has been recorded, so the deferred destruction is registered at
+    /// the buffer's true last-use tick rather than its creation tick.
+    void ReleasePendingScratchBuffers();
+
 private:
     vk::Pipeline GetTilingPipeline(const ImageInfo& info, bool is_tiler);
     ScratchBuffer GetScratchBuffer(u32 size);
@@ -62,6 +69,9 @@ private:
     vk::UniquePipelineLayout pl_layout;
     std::unordered_map<TilingPipelineKey, vk::UniquePipeline, TilingPipelineKeyHash>
         tiling_pipelines{};
+    // Scratch buffers awaiting deferred destruction at their last-use tick. Drained by
+    // ReleasePendingScratchBuffers() once the consuming command has been recorded.
+    std::vector<ScratchBuffer> pending_scratch_buffers{};
 };
 
 } // namespace VideoCore

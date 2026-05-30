@@ -217,9 +217,13 @@ TileManager::Result TileManager::DetileImage(vk::Buffer in_buffer, u32 in_offset
     };
 
     const auto [out_buffer, out_allocation] = GetScratchBuffer(info.guest_size);
-    scheduler.DeferOperation([this, out_buffer, out_allocation]() {
-        vmaDestroyBuffer(instance.GetAllocator(), out_buffer, out_allocation);
-    });
+    // The detiled scratch buffer is returned to the caller and consumed by a later
+    // image.Upload (which ends rendering and records into a *new* command buffer at a
+    // later tick). Deferring its destruction here, at the detile tick, would free it
+    // while that later Upload command buffer still references it -> MoltenVK kIOGPU
+    // Invalid Resource / device loss. Stash it instead; ReleasePendingScratchBuffers()
+    // is called by the caller after Upload to defer-destroy it at the correct tick.
+    pending_scratch_buffers.emplace_back(out_buffer, out_allocation);
 
     scheduler.EndRendering();
 
@@ -272,6 +276,22 @@ TileManager::Result TileManager::DetileImage(vk::Buffer in_buffer, u32 in_offset
     }
     cmdbuf.dispatch(dim_x, 1, 1);
     return {out_buffer, 0};
+}
+
+void TileManager::ReleasePendingScratchBuffers() {
+    if (pending_scratch_buffers.empty()) {
+        return;
+    }
+    // Registered at the current tick, which (thanks to the caller invoking this after the
+    // consuming command was recorded) is the buffer's true last-use tick. The scheduler's
+    // PopPendingOperations gate guarantees this destruction does not run until that
+    // recording has been submitted and completed.
+    for (const auto& [buffer, allocation] : pending_scratch_buffers) {
+        scheduler.DeferOperation([this, buffer, allocation]() {
+            vmaDestroyBuffer(instance.GetAllocator(), buffer, allocation);
+        });
+    }
+    pending_scratch_buffers.clear();
 }
 
 void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,

@@ -1181,6 +1181,10 @@ void TextureCache::RefreshImage(Image& image) {
     }
 
     image.Upload(image_copies, buffer, offset);
+    // The detile scratch buffer is consumed by image.Upload above; release it now so its
+    // deferred destruction is registered at this (last-use) tick rather than the earlier
+    // detile tick, preventing a use-after-free of the buffer by the Upload command buffer.
+    tile_manager.ReleasePendingScratchBuffers();
 }
 
 vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler,
