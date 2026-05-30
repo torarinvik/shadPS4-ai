@@ -422,6 +422,18 @@ public:
         pending_ops.emplace(std::move(func), CurrentTick());
     }
 
+    /// Defers an operation until the gpu has passed the tick AFTER the current one.
+    /// Use this when the resource being destroyed may still be referenced by the
+    /// command buffer currently being recorded but not yet submitted: deferring to
+    /// CurrentTick() alone can run via PopPendingOperations (called from several draw
+    /// paths, not only submit) while KnownGpuTick() already equals CurrentTick() from a
+    /// prior frame, destroying the resource before the open recording is submitted.
+    /// Waiting one extra tick guarantees the current recording has been submitted and
+    /// completed first.
+    void DeferOperationAfterSubmit(Common::UniqueFunction<void>&& func) {
+        pending_ops.emplace(std::move(func), CurrentTick() + 1);
+    }
+
     /// Defers an operation until the gpu has reached the current cpu tick.
     /// Runs as soon as possible in another thread.
     void DeferPriorityOperation(Common::UniqueFunction<void>&& func) {

@@ -808,7 +808,11 @@ vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> c
             const VAddr device_addr = buffer.CpuAddr() + copy.dstOffset;
             memory->CopySparseMemory(device_addr, src_pointer, copy.size);
         }
-        scheduler.DeferOperation([buffer = std::move(temp_buffer)]() mutable { buffer.reset(); });
+        // src_buffer is returned and recorded into the current command buffer by the
+        // caller, so its destruction must wait until that recording is submitted and
+        // completed (see DeleteBuffer / DeferOperationAfterSubmit rationale).
+        scheduler.DeferOperationAfterSubmit(
+            [buffer = std::move(temp_buffer)]() mutable { buffer.reset(); });
         return src_buffer;
     }
 }
@@ -923,7 +927,10 @@ void BufferCache::WriteDataBuffer(Buffer& buffer, VAddr address, const void* val
         src_buffer = temp_buffer.Handle();
         u8* const staging = temp_buffer.mapped_data.data();
         std::memcpy(staging, value, num_bytes);
-        scheduler.DeferOperation([buffer = std::move(temp_buffer)]() mutable {});
+        // src_buffer (this temp buffer's handle) is recorded into the command buffer
+        // below, so its destruction must wait until that recording is submitted and
+        // completed (see DeleteBuffer / DeferOperationAfterSubmit rationale).
+        scheduler.DeferOperationAfterSubmit([buffer = std::move(temp_buffer)]() mutable {});
     }
     scheduler.EndRendering();
     const auto cmdbuf = scheduler.CommandBuffer();
@@ -991,7 +998,13 @@ void BufferCache::TouchBuffer(const Buffer& buffer) {
 void BufferCache::DeleteBuffer(BufferId buffer_id) {
     Buffer& buffer = slot_buffers[buffer_id];
     Unregister(buffer_id);
-    scheduler.DeferOperation([this, buffer_id] { slot_buffers.erase(buffer_id); });
+    // The buffer may still be referenced by the command buffer currently being recorded
+    // (e.g. the copyBuffer emitted by ExpandBuffer just before this call). Defer the GPU
+    // resource destruction until after the current recording has been submitted and
+    // completed, otherwise PopPendingOperations can run vmaDestroyBuffer while Metal still
+    // requires the buffer alive for an in-flight command buffer (kIOGPU Invalid Resource
+    // device loss observed in UFC 3 / Madden NFL 24).
+    scheduler.DeferOperationAfterSubmit([this, buffer_id] { slot_buffers.erase(buffer_id); });
     buffer.is_deleted = true;
 }
 
