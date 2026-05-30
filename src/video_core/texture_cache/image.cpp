@@ -17,6 +17,8 @@ namespace VideoCore {
 
 using namespace Vulkan;
 
+Common::IncrementalIdProvider<u64> Image::global_image_uid{};
+
 static bool IsStrictRenderValidationEnabled() {
     static const bool enabled = Common::Trace::EnvEnabled("SHADPS4_STRICT_RENDER_VALIDATION");
     return enabled;

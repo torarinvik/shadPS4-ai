@@ -308,6 +308,17 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             UNREACHABLE_MSG("Wrong PM4 type {}", type);
             break;
         case 0:
+            // The graphics command processor does not consume real type-0 (register
+            // write) packets. Guests can however leave zero-padded holes inside the
+            // submitted DCB (e.g. space reserved for a marker the driver did not fill).
+            // Such a hole appears as a run of zero dwords, each decoding as a bogus
+            // type-0 header. Treat a zero dword as one dword of padding and skip it,
+            // mirroring the type-2 NOP handling, so the parser realigns on the next
+            // real packet instead of crashing.
+            if (header->raw == 0) {
+                dcb = NextPacket(dcb, 1);
+                continue;
+            }
             UNREACHABLE_MSG("Unimplemented PM4 type 0, base reg: {}, size: {}",
                             header->type0.base.Value(), header->type0.NumWords());
             break;

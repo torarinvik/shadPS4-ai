@@ -339,13 +339,6 @@ s32 PS4_SYSV_ABI posix_getrusage(s32 who, void* usage) {
     return 0;
 }
 
-using SignalHandler = void (*)(s32);
-
-SignalHandler PS4_SYSV_ABI posix_signal(s32 signum, SignalHandler handler) {
-    LOG_DEBUG(Lib_Kernel, "(PARTIAL) signum = {}, handler = {}", signum, fmt::ptr(handler));
-    return nullptr;
-}
-
 s32 PS4_SYSV_ABI posix_sysctl(const s32* name, u32 namelen, void* oldp, u64* oldlenp,
                               const void* newp, u64 newlen) {
     LOG_DEBUG(Lib_Kernel, "(STUBBED) namelen = {}, oldp = {}, newp = {}, newlen = {}", namelen,
@@ -415,7 +408,6 @@ void RegisterProcess(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("ZzzC3ZGVAkc", "libkernel", 1, "libkernel", sceKernelGetModuleList2);
     LIB_FUNCTION("kg4x8Prhfxw", "libkernel", 1, "libkernel", posix_getuid);
     LIB_FUNCTION("hHlZQUnlxSM", "libkernel", 1, "libkernel", posix_getrusage);
-    LIB_FUNCTION("VADc3MNQ3cM", "libkernel", 1, "libkernel", posix_signal);
     LIB_FUNCTION("DFmMT80xcNI", "libkernel", 1, "libkernel", posix_sysctl);
     LIB_FUNCTION("mo0bFmWppIw", "libkernel", 1, "libkernel", posix_sigreturn);
     LIB_FUNCTION("Fjc4-n1+y2g", "libkernel", 1, "libkernel", elf_phdr_match_addr);
