@@ -137,7 +137,12 @@ void Scheduler::PopPendingOperations() {
            // device loss). Requiring gpu_tick < current_tick guarantees the recording that
            // owns the resource has been submitted before we reclaim it.
            pending_ops.front().gpu_tick < current_tick &&
-           master_semaphore.IsFree(pending_ops.front().gpu_tick)) {
+           master_semaphore.IsFree(pending_ops.front().gpu_tick) &&
+           // Cross-scheduler gate: also require every sibling scheduler (sharing this Metal
+           // queue on an independent timeline) to have completed the in-flight work it had
+           // when this op was registered, so no other scheduler's command buffer still
+           // references the resource being freed.
+           SiblingWaitsSatisfied(pending_ops.front())) {
         pending_ops.front().callback();
         pending_ops.pop();
     }
@@ -238,6 +243,11 @@ void Scheduler::PriorityPendingOpsThread(std::stop_token stoken) {
         }
 
         master_semaphore.Wait(op.gpu_tick);
+        // Cross-scheduler gate: also wait for each sibling scheduler's snapshot tick so no other
+        // scheduler's in-flight command buffer still references the resource being freed.
+        for (u32 i = 0; i < op.num_sibling_waits; ++i) {
+            op.sibling_sems[i]->Wait(op.sibling_ticks[i]);
+        }
         if (stoken.stop_requested()) {
             break;
         }

@@ -898,6 +898,19 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
       swapchain{instance, window},
       rasterizer{std::make_unique<Rasterizer>(instance, draw_scheduler, liverpool)},
       texture_cache{rasterizer->GetTextureCache()} {
+    // The three schedulers share one Metal queue but each has an independent timeline. Register
+    // them as siblings so any deferred GPU-resource destruction waits for the other two
+    // schedulers' in-flight command buffers to complete before freeing — closing the
+    // cross-scheduler use-after-free that MoltenVK reports as kIOGPU Invalid Resource (device
+    // loss). This is strictly more conservative than the previous per-scheduler tick gate: it can
+    // only ever delay a free, never free earlier, so it cannot corrupt rendering.
+    draw_scheduler.AddSiblingSemaphore(present_scheduler.GetMasterSemaphore());
+    draw_scheduler.AddSiblingSemaphore(flip_scheduler.GetMasterSemaphore());
+    present_scheduler.AddSiblingSemaphore(draw_scheduler.GetMasterSemaphore());
+    present_scheduler.AddSiblingSemaphore(flip_scheduler.GetMasterSemaphore());
+    flip_scheduler.AddSiblingSemaphore(draw_scheduler.GetMasterSemaphore());
+    flip_scheduler.AddSiblingSemaphore(present_scheduler.GetMasterSemaphore());
+
     if (IsStrictBlackScreenWatchdogEnabled()) {
         black_frame_watchdog = std::make_shared<BlackFrameWatchdog>();
         const auto& cfg = black_frame_watchdog->config;

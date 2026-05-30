@@ -287,7 +287,14 @@ void TileManager::ReleasePendingScratchBuffers() {
     // PopPendingOperations gate guarantees this destruction does not run until that
     // recording has been submitted and completed.
     for (const auto& [buffer, allocation] : pending_scratch_buffers) {
-        scheduler.DeferOperation([this, buffer, allocation]() {
+        // DeferOperationAfterSubmit (CurrentTick()+1), not DeferOperation: this scratch buffer
+        // feeds an image that is consumed cross-scheduler (the VideoOut flip path refreshes the
+        // image on draw_scheduler but blits it on flip_scheduler). Gating the destroy one extra
+        // tick guarantees not only that draw_scheduler's recording is submitted+completed, but
+        // that the next submit boundary has passed, closing the cross-scheduler window where a
+        // different scheduler's in-flight command buffer still references the resource. This is a
+        // pure delay of the free; it never reuses or early-releases the buffer contents.
+        scheduler.DeferOperationAfterSubmit([this, buffer, allocation]() {
             vmaDestroyBuffer(instance.GetAllocator(), buffer, allocation);
         });
     }
@@ -337,7 +344,13 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     };
 
     const auto [temp_buffer, temp_allocation] = GetScratchBuffer(info.guest_size);
-    scheduler.DeferOperation([this, temp_buffer, temp_allocation]() {
+    // DeferOperationAfterSubmit (CurrentTick()+1): the destroy is registered here, before the
+    // tiling compute that consumes temp_buffer is recorded below. Deferring to CurrentTick()
+    // alone can be reclaimed by PopPendingOperations as soon as a prior frame's GPU tick reaches
+    // CurrentTick(), freeing the buffer while this not-yet-submitted recording still references
+    // it. The extra tick guarantees this recording is submitted+completed first. Pure delay of
+    // the free; contents are never reused or early-released.
+    scheduler.DeferOperationAfterSubmit([this, temp_buffer, temp_allocation]() {
         vmaDestroyBuffer(instance.GetAllocator(), temp_buffer, temp_allocation);
     });
 

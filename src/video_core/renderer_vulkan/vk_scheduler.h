@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <array>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <queue>
+#include <vector>
 
 #include "common/assert.h"
 #include "common/unique_function.h"
@@ -356,8 +358,33 @@ struct DynamicState {
 
 class Scheduler {
 public:
+    // Max number of sibling schedulers whose in-flight work a deferred destroy must also wait
+    // for. The renderer runs three schedulers on one queue (draw/present/flip), so each has 2.
+    static constexpr size_t MaxSiblings = 3;
+
+    struct PendingOp {
+        Common::UniqueFunction<void> callback;
+        u64 gpu_tick;
+        // Snapshot of each sibling scheduler's highest already-submitted tick at the moment this
+        // op was registered. The destroy must not run until every sibling has GPU-completed its
+        // snapshot tick — otherwise a different scheduler's in-flight command buffer (on the same
+        // Metal queue, but an independent timeline) may still reference the resource, which
+        // MoltenVK reports as kIOGPUCommandBufferCallbackErrorInvalidResource (device loss).
+        u32 num_sibling_waits = 0;
+        std::array<MasterSemaphore*, MaxSiblings> sibling_sems{};
+        std::array<u64, MaxSiblings> sibling_ticks{};
+    };
+
     explicit Scheduler(const Instance& instance);
     ~Scheduler();
+
+    /// Registers another scheduler's timeline semaphore as a sibling. Deferred destroys on this
+    /// scheduler will additionally wait for the sibling's in-flight work to complete, closing the
+    /// cross-scheduler resource-lifetime window (three schedulers share one Metal queue, each with
+    /// its own independent tick counter and no built-in cross-synchronization for frees).
+    void AddSiblingSemaphore(MasterSemaphore* sem) {
+        sibling_semaphores.push_back(sem);
+    }
 
     /// Sends the current execution context to the GPU
     /// and increments the scheduler timeline semaphore.
@@ -419,7 +446,9 @@ public:
     /// Defers an operation until the gpu has reached the current cpu tick.
     /// Will be run when submitting or calling PopPendingOperations.
     void DeferOperation(Common::UniqueFunction<void>&& func) {
-        pending_ops.emplace(std::move(func), CurrentTick());
+        PendingOp op{std::move(func), CurrentTick()};
+        CaptureSiblingWaits(op);
+        pending_ops.emplace(std::move(op));
     }
 
     /// Defers an operation until the gpu has passed the tick AFTER the current one.
@@ -431,7 +460,9 @@ public:
     /// Waiting one extra tick guarantees the current recording has been submitted and
     /// completed first.
     void DeferOperationAfterSubmit(Common::UniqueFunction<void>&& func) {
-        pending_ops.emplace(std::move(func), CurrentTick() + 1);
+        PendingOp op{std::move(func), CurrentTick() + 1};
+        CaptureSiblingWaits(op);
+        pending_ops.emplace(std::move(op));
     }
 
     /// Defers an operation until the gpu has reached the current cpu tick.
@@ -439,7 +470,9 @@ public:
     void DeferPriorityOperation(Common::UniqueFunction<void>&& func) {
         {
             std::unique_lock lk(priority_pending_ops_mutex);
-            priority_pending_ops.emplace(std::move(func), CurrentTick());
+            PendingOp op{std::move(func), CurrentTick()};
+            CaptureSiblingWaits(op);
+            priority_pending_ops.emplace(std::move(op));
         }
         priority_pending_ops_cv.notify_one();
     }
@@ -453,6 +486,34 @@ private:
 
     void PriorityPendingOpsThread(std::stop_token stoken);
 
+    /// Snapshots each sibling scheduler's highest already-submitted tick into the op, so its
+    /// deferred destroy can wait for that sibling's in-flight work to complete on the GPU.
+    void CaptureSiblingWaits(PendingOp& op) {
+        op.num_sibling_waits = 0;
+        for (MasterSemaphore* sem : sibling_semaphores) {
+            op.sibling_sems[op.num_sibling_waits] = sem;
+            // CurrentTick() is the open (not-yet-submitted) recording; the highest submitted
+            // tick is CurrentTick()-1. current_tick starts at 1, so this never underflows, and
+            // an idle sibling yields IsFree(0)==true (never blocks the destroy).
+            op.sibling_ticks[op.num_sibling_waits] = sem->CurrentTick() - 1;
+            ++op.num_sibling_waits;
+        }
+    }
+
+    /// Returns true once every sibling has GPU-completed its snapshot tick.
+    bool SiblingWaitsSatisfied(PendingOp& op) {
+        for (u32 i = 0; i < op.num_sibling_waits; ++i) {
+            MasterSemaphore* sem = op.sibling_sems[i];
+            if (!sem->IsFree(op.sibling_ticks[i])) {
+                sem->Refresh();
+                if (!sem->IsFree(op.sibling_ticks[i])) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
 private:
     const Instance& instance;
     MasterSemaphore master_semaphore;
@@ -460,10 +521,8 @@ private:
     DynamicState dynamic_state;
     vk::CommandBuffer current_cmdbuf;
     std::condition_variable_any event_cv;
-    struct PendingOp {
-        Common::UniqueFunction<void> callback;
-        u64 gpu_tick;
-    };
+    // Sibling schedulers' timeline semaphores (set up once at init via AddSiblingSemaphore).
+    std::vector<MasterSemaphore*> sibling_semaphores;
     std::queue<PendingOp> pending_ops;
     std::queue<PendingOp> priority_pending_ops;
     std::mutex priority_pending_ops_mutex;
