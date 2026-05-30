@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <memory>
@@ -77,6 +78,8 @@ struct HttpRequest {
     u64 content_length = 0;
     HttpRequestState state = HttpRequestState::Created;
     bool deleted = false;
+    bool nb_event_reported = false; // set once sceHttpWaitRequest has delivered this
+                                    // request's terminal completion event.
     s32 last_errno = 0; // populated by SendRequest, read by GetLastErrno
     HttpSettings settings;
     HttpResponse res;
@@ -921,9 +924,93 @@ int PS4_SYSV_ABI sceHttpUnsetEpoll(int id) {
 
 int PS4_SYSV_ABI sceHttpWaitRequest(OrbisHttpEpollHandle eh, OrbisHttpNBEvent* nbev, int maxevents,
                                     int timeout) {
-    LOG_ERROR(Lib_Http, "(STUBBED) called eh={}, nbev={}, maxevents={}, timeout={}", fmt::ptr(eh),
+    LOG_DEBUG(Lib_Http, "called eh={}, nbev={}, maxevents={}, timeout={}", fmt::ptr(eh),
               fmt::ptr(nbev), maxevents, timeout);
-    return ORBIS_OK;
+    std::unique_lock<std::mutex> lock(g_state.m_mutex);
+    if (!g_state.inited) {
+        LOG_ERROR(Lib_Http, "Not initialized");
+        return ORBIS_HTTP_ERROR_BEFORE_INIT;
+    }
+    if (maxevents <= 0 || !nbev) {
+        LOG_ERROR(Lib_Http, "InvalidValue (maxevents={}, nbev={})", maxevents, fmt::ptr(nbev));
+        return ORBIS_HTTP_ERROR_INVALID_VALUE;
+    }
+
+    // The fork's epoll handles are stubs, and games (e.g. Madden NFL 24) bind
+    // requests with a null handle and then poll for completion here. Rather than
+    // depend on epoll-handle plumbing, scan for any not-yet-reported request that
+    // has reached a terminal state and surface a completion event for it. The
+    // async worker in sceHttpSendRequest synthesizes a transport-failure response
+    // and moves the request to Sent, so this lets the game's non-blocking poll
+    // loop observe the (failed) completion and proceed instead of spinning.
+    auto fill_event = [](OrbisHttpNBEvent& ev, int reqId, const HttpRequest& req) {
+        u32 bits;
+        if (req.state == HttpRequestState::Aborted) {
+            bits = ORBIS_HTTP_NB_EVENT_HUP;
+        } else if (req.res.status_code == 0 && req.last_errno != 0) {
+            // Transport/DNS failure: no status line was ever received.
+            bits = ORBIS_HTTP_NB_EVENT_RESOLVER_ERR | ORBIS_HTTP_NB_EVENT_HUP;
+        } else {
+            // Response available to read.
+            bits = ORBIS_HTTP_NB_EVENT_IN;
+        }
+        ev.events = bits;
+        ev.eventDetail = bits;
+        ev.id = reqId;
+        ev.userArg = nullptr;
+    };
+
+    auto drain = [&]() -> int {
+        int count = 0;
+        for (auto& [reqId, req_ptr] : g_state.requests) {
+            if (count >= maxevents) {
+                break;
+            }
+            auto& req = *req_ptr;
+            if (req.nb_event_reported || req.deleted) {
+                continue;
+            }
+            if (req.state == HttpRequestState::Sent ||
+                req.state == HttpRequestState::Aborted) {
+                fill_event(nbev[count], reqId, req);
+                req.nb_event_reported = true;
+                ++count;
+            }
+        }
+        return count;
+    };
+
+    int already = drain();
+    if (already > 0) {
+        LOG_INFO(Lib_Http, "returned {} completion event(s)", already);
+        return already;
+    }
+
+    // Nothing ready. timeout==0 is a non-blocking poll: return 0 immediately.
+    if (timeout == 0 || g_state.shutting_down.load()) {
+        return 0;
+    }
+
+    // Bounded wait for a request to reach a terminal state. We do not have a
+    // dedicated CV for the request set, so poll briefly under the lock-release.
+    auto deadline_us = timeout < 0 ? std::chrono::microseconds::max()
+                                   : std::chrono::microseconds(timeout);
+    auto waited = std::chrono::microseconds(0);
+    constexpr auto step = std::chrono::microseconds(2000);
+    while (waited < deadline_us && !g_state.shutting_down.load()) {
+        lock.unlock();
+        std::this_thread::sleep_for(step);
+        lock.lock();
+        int count = drain();
+        if (count > 0) {
+            LOG_INFO(Lib_Http, "returned {} completion event(s) after wait", count);
+            return count;
+        }
+        if (deadline_us != std::chrono::microseconds::max()) {
+            waited += step;
+        }
+    }
+    return 0;
 }
 
 int PS4_SYSV_ABI sceHttpUriCopy() {

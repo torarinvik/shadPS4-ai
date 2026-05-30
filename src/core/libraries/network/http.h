@@ -33,6 +33,17 @@ constexpr u32 ORBIS_HTTPS_FLAG_SDK_DEFAULT = ORBIS_HTTPS_FLAG_SERVER_VERIFY |
 constexpr u32 ORBIS_HTTPS_FLAG_PUBLIC_VALID = 0x000020ff;
 constexpr u32 ORBIS_HTTPS_FLAG_PRIVATE_VALID = 0x00002dff;
 
+// Non-blocking event bits reported through OrbisHttpNBEvent::events by
+// sceHttpWaitRequest. Values match the PS4 SDK.
+enum OrbisHttpNBEventFlags : u32 {
+    ORBIS_HTTP_NB_EVENT_IN = 0x00000001U,           // Ready to receive (response data available).
+    ORBIS_HTTP_NB_EVENT_OUT = 0x00000002U,          // Ready to send.
+    ORBIS_HTTP_NB_EVENT_SOCK_ERR = 0x00000008U,     // Socket-level error during send/recv.
+    ORBIS_HTTP_NB_EVENT_HUP = 0x00000010U,          // Request interrupted by the application.
+    ORBIS_HTTP_NB_EVENT_RESOLVED = 0x00010000U,     // DNS resolution completed.
+    ORBIS_HTTP_NB_EVENT_RESOLVER_ERR = 0x00020000U, // DNS resolution failed.
+};
+
 enum OrbisHttpMethod : s32 {
     ORBIS_HTTP_METHOD_GET = 0,
     ORBIS_HTTP_METHOD_POST = 1,
