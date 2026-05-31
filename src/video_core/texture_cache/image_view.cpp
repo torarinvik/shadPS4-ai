@@ -5,6 +5,7 @@
 #include "common/assert.h"
 #include "common/trace_control.h"
 #include "shader_recompiler/resource.h"
+#include "video_core/host_diagnostics.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/texture_cache/image.h"
@@ -146,6 +147,14 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     const bool empty_range = info.range.extent.levels == 0 || info.range.extent.layers == 0;
     const bool oob_range =
         end_level > image.info.resources.levels || end_layer > image.info.resources.layers;
+    if (oob_range) {
+        VideoCore::Diag::ReportOnce(
+            "imgview:oob",
+            fmt::format("[ImageView] subresource range exceeds image: addr={:#x} end_level={}/{} "
+                        "end_layer={}/{}",
+                        image.info.guest_address, end_level, image.info.resources.levels, end_layer,
+                        image.info.resources.layers));
+    }
     if (format_substituted) {
         LOG_INFO(Render_Vulkan,
                  "TRACE_IMAGE_VIEW format_substitution guest_addr={:#x} guest_size={} "

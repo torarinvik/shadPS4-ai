@@ -75,7 +75,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 54. [ ] guest_size == sum of mips_layout.
 55. [ ] Color-attachment-and-texture-in-same-pass uses feedback-loop layout (or warn).
 56. [ ] Buffer usage flags include what the bind requires.
-57. [ ] image_view subresource subset of image range - make the oob check always-warn.
+57. [x] image_view subresource subset of image range - oob now always-warns via ReportOnce (rate-limited; strict still asserts).
 58. [ ] Tiling-mode/array-mode consistency before image reuse.
 
 ## TIER 2 — Texture-cache & aliasing invariants
