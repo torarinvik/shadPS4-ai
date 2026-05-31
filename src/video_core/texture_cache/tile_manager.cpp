@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "video_core/buffer_cache/buffer.h"
+#include "video_core/host_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -274,6 +275,7 @@ TileManager::Result TileManager::DetileImage(vk::Buffer in_buffer, u32 in_offset
     if (dim_x == 0) {
         return {out_buffer, 0};
     }
+    VideoCore::Diag::CheckDispatch("TileManager.Detile", dim_x, 1, 1);
     cmdbuf.dispatch(dim_x, 1, 1);
     return {out_buffer, 0};
 }
@@ -413,6 +415,7 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     if (dim_x == 0) {
         return;
     }
+    VideoCore::Diag::CheckDispatch("TileManager.Tile", dim_x, 1, 1);
     cmdbuf.dispatch(dim_x, 1, 1);
 
     if (auto barrier =

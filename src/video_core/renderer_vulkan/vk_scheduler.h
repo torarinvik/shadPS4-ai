@@ -378,12 +378,20 @@ public:
     explicit Scheduler(const Instance& instance);
     ~Scheduler();
 
-    /// Registers another scheduler's timeline semaphore as a sibling. Deferred destroys on this
-    /// scheduler will additionally wait for the sibling's in-flight work to complete, closing the
-    /// cross-scheduler resource-lifetime window (three schedulers share one Metal queue, each with
-    /// its own independent tick counter and no built-in cross-synchronization for frees).
-    void AddSiblingSemaphore(MasterSemaphore* sem) {
-        sibling_semaphores.push_back(sem);
+    /// Registers another scheduler as a sibling. Deferred destroys on this scheduler will
+    /// additionally wait for the sibling's in-flight work to complete, closing the cross-scheduler
+    /// resource-lifetime window (three schedulers share one Metal queue, each with its own
+    /// independent tick counter and no built-in cross-synchronization for frees).
+    void AddSibling(Scheduler* sibling) {
+        sibling_schedulers.push_back(sibling);
+    }
+
+    /// True if the current (not-yet-submitted) command buffer has been handed out for recording
+    /// since the last submit. Used to decide whether a sibling's OPEN recording must be waited for
+    /// by a cross-scheduler deferred destroy (an actively-recording sibling will submit its open
+    /// tick; an idle one never will, so waiting on it would leak).
+    [[nodiscard]] bool HasOpenRecording() const noexcept {
+        return current_buffer_has_work;
     }
 
     /// Sends the current execution context to the GPU
@@ -419,8 +427,10 @@ public:
         return dynamic_state;
     }
 
-    /// Returns the current command buffer.
+    /// Returns the current command buffer. Handing it out marks this scheduler as having open
+    /// (not-yet-submitted) work, so a cross-scheduler deferred destroy waits for this recording.
     vk::CommandBuffer CommandBuffer() const {
+        current_buffer_has_work = true;
         return current_cmdbuf;
     }
 
@@ -486,16 +496,22 @@ private:
 
     void PriorityPendingOpsThread(std::stop_token stoken);
 
-    /// Snapshots each sibling scheduler's highest already-submitted tick into the op, so its
-    /// deferred destroy can wait for that sibling's in-flight work to complete on the GPU.
+    /// Snapshots each sibling scheduler's last-referencing tick into the op, so its deferred
+    /// destroy can wait for that sibling's in-flight work to complete on the GPU.
     void CaptureSiblingWaits(PendingOp& op) {
         op.num_sibling_waits = 0;
-        for (MasterSemaphore* sem : sibling_semaphores) {
-            op.sibling_sems[op.num_sibling_waits] = sem;
-            // CurrentTick() is the open (not-yet-submitted) recording; the highest submitted
-            // tick is CurrentTick()-1. current_tick starts at 1, so this never underflows, and
-            // an idle sibling yields IsFree(0)==true (never blocks the destroy).
-            op.sibling_ticks[op.num_sibling_waits] = sem->CurrentTick() - 1;
+        for (Scheduler* sibling : sibling_schedulers) {
+            op.sibling_sems[op.num_sibling_waits] = sibling->GetMasterSemaphore();
+            // CurrentTick() is the sibling's open (not-yet-submitted) recording; CurrentTick()-1
+            // is its highest already-submitted tick. If the sibling is actively recording, that
+            // OPEN command buffer may reference the resource we're about to free, so we must wait
+            // for it (CurrentTick()) — it WILL be submitted. If the sibling has no open recording
+            // (e.g. the idle flip scheduler), wait only for already-submitted work (CurrentTick()-1)
+            // since its open tick may never be submitted and would otherwise leak the destroy.
+            // current_tick starts at 1, so CurrentTick()-1 never underflows and IsFree(0) is always
+            // true (an idle sibling never blocks the destroy).
+            op.sibling_ticks[op.num_sibling_waits] =
+                sibling->HasOpenRecording() ? sibling->CurrentTick() : sibling->CurrentTick() - 1;
             ++op.num_sibling_waits;
         }
     }
@@ -520,9 +536,12 @@ private:
     CommandPool command_pool;
     DynamicState dynamic_state;
     vk::CommandBuffer current_cmdbuf;
+    // Set when the current command buffer is handed out for recording; cleared on submit. Lets a
+    // cross-scheduler deferred destroy tell whether a sibling has an open recording to wait for.
+    mutable bool current_buffer_has_work = false;
     std::condition_variable_any event_cv;
-    // Sibling schedulers' timeline semaphores (set up once at init via AddSiblingSemaphore).
-    std::vector<MasterSemaphore*> sibling_semaphores;
+    // Sibling schedulers (set up once at init via AddSibling).
+    std::vector<Scheduler*> sibling_schedulers;
     std::queue<PendingOp> pending_ops;
     std::queue<PendingOp> priority_pending_ops;
     std::mutex priority_pending_ops_mutex;

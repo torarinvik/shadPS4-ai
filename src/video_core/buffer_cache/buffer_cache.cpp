@@ -11,6 +11,7 @@
 #include "core/memory.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/buffer_cache/buffer_cache.h"
+#include "video_core/host_diagnostics.h"
 #include "video_core/buffer_cache/memory_tracker.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -425,6 +426,9 @@ void BufferCache::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, 
         .bufferMemoryBarrierCount = 2,
         .pBufferMemoryBarriers = buf_barriers_before,
     });
+    VideoCore::Diag::CheckBufferCopy("BufferCache.Copy", src_buffer.SizeBytes(),
+                                     dst_buffer.SizeBytes(), region.srcOffset, region.dstOffset,
+                                     region.size);
     cmdbuf.copyBuffer(src_buffer.Handle(), dst_buffer.Handle(), region);
     const vk::BufferMemoryBarrier2 buf_barriers_after[2] = {
         {
@@ -632,6 +636,9 @@ void BufferCache::JoinOverlap(BufferId new_buffer_id, BufferId overlap_id,
         .pBufferMemoryBarriers = pre_barriers.data(),
     });
 
+    VideoCore::Diag::CheckBufferCopy("BufferCache.ExpandOverlap", overlap.SizeBytes(),
+                                     new_buffer.SizeBytes(), copy.srcOffset, copy.dstOffset,
+                                     copy.size);
     cmdbuf.copyBuffer(overlap.Handle(), new_buffer.Handle(), copy);
 
     boost::container::static_vector<vk::BufferMemoryBarrier2, 2> post_barriers{};

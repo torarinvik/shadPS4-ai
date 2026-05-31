@@ -567,6 +567,12 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
         // The guest requires a depth sampled texture, but cache can offer only Rxf. Need to
         // recreate the image.
         recreate |= requested_info.props.is_depth && !cache_image.info.props.is_depth;
+        // The reverse: the guest samples a depth surface as a non-depth (e.g. R16) texture. A
+        // non-depth view of a depth image is impossible, so recreate the surface in the requested
+        // format (a 1-for-1 swap that frees the old depth image) instead of rejecting reuse, which
+        // would leave the depth image registered and accumulate one image per bind (the churn that
+        // lost the device in UFC 3 at the menu/movie transition).
+        recreate |= cache_image.info.props.is_depth && !requested_info.props.is_depth;
         break;
     case BindingType::Storage:
         // If the guest is going to use previously created depth as storage, the image needs to be
@@ -668,19 +674,15 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
             return {merged_image_id, -1, -1};
         }
 
-        if ((binding == BindingType::Texture || binding == BindingType::Storage) &&
-            cache_image.info.props.is_depth && !image_info.props.is_depth &&
-            !CanCreateDepthStencilViewAs(cache_image.info, image_info.pixel_format)) {
-            LOG_WARNING(Render_Vulkan,
-                        "Avoiding incompatible depth-stencil image reuse requested_addr={:#x} "
-                        "requested_size={} requested_format={} cached_id={} cached_addr={:#x} "
-                        "cached_size={} cached_format={} binding={}",
-                        image_info.guest_address, image_info.guest_size,
-                        vk::to_string(image_info.pixel_format), cache_image_id.index,
-                        cache_image.info.guest_address, cache_image.info.guest_size,
-                        vk::to_string(cache_image.info.pixel_format), BindingTypeName(binding));
-            return {merged_image_id, -1, -1};
-        }
+        // A non-depth Texture/Storage binding over a cached depth surface (a depth-as-texture
+        // read) used to be rejected here, which left the old depth image registered and
+        // accumulated a new image per bind — the aliasing/GC churn that lost the device in UFC 3
+        // at the menu/movie transition (~1500 images at one address in a single frame). Instead,
+        // fall through to ResolveDepthOverlap below: it RECREATES the surface in the requested
+        // (non-depth) format and FREES the old depth image — a stable 1-for-1 swap (handled for
+        // both Texture and Storage by the recreate conditions in the binding switch above). The
+        // reinterpreted contents may be uninitialized (a possible visual artifact) but it neither
+        // churns nor loses the device.
 
         if (const auto depth_image_id = ResolveDepthOverlap(image_info, binding, cache_image_id)) {
             return {depth_image_id, -1, -1};

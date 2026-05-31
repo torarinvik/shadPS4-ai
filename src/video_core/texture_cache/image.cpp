@@ -4,6 +4,7 @@
 #include <ranges>
 #include "common/assert.h"
 #include "common/trace_control.h"
+#include "video_core/host_diagnostics.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -493,6 +494,10 @@ void Image::Upload(std::span<const vk::BufferImageCopy> upload_copies, vk::Buffe
 void Image::Download(std::span<const vk::BufferImageCopy> download_copies, vk::Buffer buffer,
                      u64 offset, u64 download_size) {
     ValidateCopySubresources("Image::Download", info, download_copies);
+    // The download writes image data into `buffer`; verify the regions fit the destination so we
+    // don't over-write past it (an out-of-bounds write the GPU would fault on).
+    VideoCore::Diag::CheckBufferImageCopies("Image::Download", info.guest_address, info.pixel_format,
+                                            download_copies, offset + download_size);
     SetBackingSamples(info.num_samples);
     scheduler->EndRendering();
 
@@ -804,6 +809,10 @@ void Image::CopyImageWithBuffer(Image& src_image, vk::Buffer buffer, u64 offset)
         .pBufferMemoryBarriers = &pre_copy_barrier,
     });
 
+    VideoCore::Diag::CheckImageSubresources("Image::CopyImageWithBuffer.src",
+                                            src_image.info.guest_address,
+                                            src_image.info.resources.levels,
+                                            src_image.info.resources.layers, buffer_copies);
     cmdbuf.copyImageToBuffer(src_image.GetImage(), vk::ImageLayout::eTransferSrcOptimal, buffer,
                              buffer_copies);
 
@@ -817,6 +826,9 @@ void Image::CopyImageWithBuffer(Image& src_image, vk::Buffer buffer, u64 offset)
         copy.imageSubresource.aspectMask = aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
     }
 
+    VideoCore::Diag::CheckImageSubresources("Image::CopyImageWithBuffer.dst", info.guest_address,
+                                            info.resources.levels, info.resources.layers,
+                                            buffer_copies);
     cmdbuf.copyBufferToImage(buffer, GetImage(), vk::ImageLayout::eTransferDstOptimal,
                              buffer_copies);
     Transit(vk::ImageLayout::eGeneral,

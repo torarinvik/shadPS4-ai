@@ -7,6 +7,7 @@
 #include "core/memory.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/amdgpu/liverpool.h"
+#include "video_core/host_diagnostics.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -547,6 +548,8 @@ void Rasterizer::DispatchDirect() {
     ForceVideoOutSourceColorsIfRequested(cmdbuf, cs);
     RecordGpuCommandDiagnostic("dispatch x=%u y=%u z=%u", cs_program.dim_x, cs_program.dim_y,
                                cs_program.dim_z);
+    VideoCore::Diag::CheckDispatch("Rasterizer.Compute", cs_program.dim_x, cs_program.dim_y,
+                                   cs_program.dim_z);
     cmdbuf.dispatch(cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
     ForceVideoOutStorageColorIfRequested(cmdbuf, cs, cs_program.dim_x, cs_program.dim_y,
                                          cs_program.dim_z);

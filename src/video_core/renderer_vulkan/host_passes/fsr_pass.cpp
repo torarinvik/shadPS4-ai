@@ -4,6 +4,7 @@
 #include "common/assert.h"
 #include "common/trace_control.h"
 #include "core/emulator_settings.h"
+#include "video_core/host_diagnostics.h"
 #include "video_core/host_shaders/fsr_comp.h"
 #include "video_core/renderer_vulkan/host_passes/fsr_pass.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
@@ -283,6 +284,7 @@ vk::ImageView FsrPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
                                         set_writes);
             cmdbuf.pushConstants(pipeline_layout.get(), vk::ShaderStageFlagBits::eCompute, 0,
                                  sizeof(FSRConstants), &consts);
+            VideoCore::Diag::CheckDispatch("FsrPass", dispatch_x, dispatch_y, 1);
             cmdbuf.dispatch(dispatch_x, dispatch_y, 1);
         }
 
@@ -348,6 +350,7 @@ vk::ImageView FsrPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
                                         set_writes);
             cmdbuf.pushConstants(pipeline_layout.get(), vk::ShaderStageFlagBits::eCompute, 0,
                                  sizeof(FSRConstants), &consts);
+            VideoCore::Diag::CheckDispatch("FsrPass", dispatch_x, dispatch_y, 1);
             cmdbuf.dispatch(dispatch_x, dispatch_y, 1);
         }
 
@@ -393,6 +396,7 @@ vk::ImageView FsrPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
                                     set_writes);
         cmdbuf.pushConstants(pipeline_layout.get(), vk::ShaderStageFlagBits::eCompute, 0,
                              sizeof(FSRConstants), &consts);
+        VideoCore::Diag::CheckDispatch("FsrPass.Rcas", dispatch_x, dispatch_y, 1);
         cmdbuf.dispatch(dispatch_x, dispatch_y, 1);
     }
 
