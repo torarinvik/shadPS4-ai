@@ -17,6 +17,7 @@
 #include "core/emulator_settings.h"
 #include "core/memory.h"
 #include "video_core/buffer_cache/buffer_cache.h"
+#include "video_core/host_diagnostics.h"
 #include "video_core/page_manager.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -1549,8 +1550,17 @@ void TextureCache::DeleteImage(ImageId image_id) {
     erase_owned_meta(meta_info.fmask_addr);
     erase_owned_meta(meta_info.htile_addr);
 
-    // Reclaim image and any image views it references.
-    scheduler.DeferOperation([this, image_id] {
+    // Reclaim image and any image views it references. Use DeferOperationAfterSubmit (CurrentTick
+    // +1), matching DeleteBuffer: an image recreated by ResolveDepthOverlap's swap is freed here
+    // while the command buffer currently being recorded (and any in-flight sibling recording) may
+    // still reference the old image; deferring to CurrentTick() alone can reclaim it before that
+    // recording is submitted+completed -> kIOGPU Invalid Resource device loss (UFC 3 menu/movie).
+    const VAddr trace_addr = image.info.guest_address;
+    const u64 trace_size = image.info.guest_size;
+    scheduler.DeferOperationAfterSubmit([this, image_id, trace_addr, trace_size] {
+        if (VideoCore::Diag::TraceFrees()) {
+            LOG_INFO(Render_Vulkan, "FREE image addr={:#x} size={}", trace_addr, trace_size);
+        }
         Image& image = slot_images[image_id];
         for (auto& backing : image.backing_images) {
             for (const ImageViewId image_view_id : backing.image_view_ids) {

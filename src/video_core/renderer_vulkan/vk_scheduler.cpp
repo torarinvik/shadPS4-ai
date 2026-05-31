@@ -154,7 +154,7 @@ void Scheduler::AllocateWorkerCommandBuffers() {
     };
 
     current_cmdbuf = command_pool.Commit();
-    current_buffer_has_work = false;
+    current_buffer_has_work.store(false, std::memory_order_release);
     Check(current_cmdbuf.begin(begin_info));
 
     // Invalidate dynamic state so it gets applied to the new command buffer.

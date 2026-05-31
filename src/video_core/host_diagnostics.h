@@ -33,6 +33,15 @@ namespace VideoCore::Diag {
     return enabled;
 }
 
+// When SHADPS4_TRACE_FREES=1, GPU-resource destructions are logged at the moment they actually run
+// (the deferred-destroy callback firing -> vmaDestroy). Used to correlate a freed resource with a
+// subsequent kIOGPU "Invalid Resource" device loss: the last resource freed before the loss, on the
+// same Metal queue, is the prime suspect for a use-after-free the static gates didn't cover.
+[[nodiscard]] inline bool TraceFrees() {
+    static const bool enabled = Common::Trace::EnvEnabled("SHADPS4_TRACE_FREES");
+    return enabled;
+}
+
 // 4x4 for block-compressed (BCn) formats, 1x1 otherwise. The copy's row length / extent are in
 // texels but a block-compressed buffer is addressed in blocks.
 [[nodiscard]] inline u32 BlockDim(vk::Format format) {
@@ -217,8 +226,11 @@ inline bool CheckBufferRange(const char* site, u64 buffer_size, u64 offset, u64 
 }
 
 // Sanity-check a compute dispatch. A zero dimension wastes a submit; an absurdly large one can hang
-// the GPU (the kIOGPU Timeout we saw). Vulkan guarantees at least 65535 groups per dimension.
-inline bool CheckDispatch(const char* site, u32 x, u32 y, u32 z, u32 max_groups = 65535u) {
+// the GPU. NOTE: the default ceiling is intentionally far above Vulkan's guaranteed-minimum 65535:
+// MoltenVK on Apple GPUs reports maxComputeWorkGroupCount ~1.07e9 per dim, so large detile
+// dispatches (tens of thousands of groups) are valid and must NOT be flagged. This only catches
+// truly runaway counts.
+inline bool CheckDispatch(const char* site, u32 x, u32 y, u32 z, u32 max_groups = (1u << 28)) {
     bool bad = false;
     if (x == 0 || y == 0 || z == 0) {
         LOG_WARNING(Render_Vulkan, "[{}] compute dispatch has a zero dimension: {}x{}x{}", site, x,

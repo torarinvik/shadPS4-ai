@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -391,7 +392,7 @@ public:
     /// by a cross-scheduler deferred destroy (an actively-recording sibling will submit its open
     /// tick; an idle one never will, so waiting on it would leak).
     [[nodiscard]] bool HasOpenRecording() const noexcept {
-        return current_buffer_has_work;
+        return current_buffer_has_work.load(std::memory_order_acquire);
     }
 
     /// Sends the current execution context to the GPU
@@ -430,7 +431,7 @@ public:
     /// Returns the current command buffer. Handing it out marks this scheduler as having open
     /// (not-yet-submitted) work, so a cross-scheduler deferred destroy waits for this recording.
     vk::CommandBuffer CommandBuffer() const {
-        current_buffer_has_work = true;
+        current_buffer_has_work.store(true, std::memory_order_release);
         return current_cmdbuf;
     }
 
@@ -538,7 +539,9 @@ private:
     vk::CommandBuffer current_cmdbuf;
     // Set when the current command buffer is handed out for recording; cleared on submit. Lets a
     // cross-scheduler deferred destroy tell whether a sibling has an open recording to wait for.
-    mutable bool current_buffer_has_work = false;
+    // Atomic: read cross-thread (a free deferred on one scheduler queries its siblings, which run
+    // on other threads).
+    mutable std::atomic<bool> current_buffer_has_work{false};
     std::condition_variable_any event_cv;
     // Sibling schedulers (set up once at init via AddSibling).
     std::vector<Scheduler*> sibling_schedulers;

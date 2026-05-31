@@ -1011,7 +1011,14 @@ void BufferCache::DeleteBuffer(BufferId buffer_id) {
     // completed, otherwise PopPendingOperations can run vmaDestroyBuffer while Metal still
     // requires the buffer alive for an in-flight command buffer (kIOGPU Invalid Resource
     // device loss observed in UFC 3 / Madden NFL 24).
-    scheduler.DeferOperationAfterSubmit([this, buffer_id] { slot_buffers.erase(buffer_id); });
+    const VAddr trace_addr = buffer.CpuAddr();
+    const u64 trace_size = buffer.SizeBytes();
+    scheduler.DeferOperationAfterSubmit([this, buffer_id, trace_addr, trace_size] {
+        if (VideoCore::Diag::TraceFrees()) {
+            LOG_INFO(Render_Vulkan, "FREE buffer addr={:#x} size={}", trace_addr, trace_size);
+        }
+        slot_buffers.erase(buffer_id);
+    });
     buffer.is_deleted = true;
 }
 

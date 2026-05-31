@@ -776,6 +776,11 @@ void Instance::CollectDeviceParameters() {
     LOG_INFO(Render_Vulkan, "GPU_Vulkan_Driver: {}", driver_name);
     LOG_INFO(Render_Vulkan, "GPU_Vulkan_Version: {}", api_version);
     LOG_INFO(Render_Vulkan, "GPU_Vulkan_Extensions: {}", extensions);
+    LOG_INFO(Render_Vulkan, "GPU_maxComputeWorkGroupCount: {}x{}x{} maxInvocations={}",
+             properties.limits.maxComputeWorkGroupCount[0],
+             properties.limits.maxComputeWorkGroupCount[1],
+             properties.limits.maxComputeWorkGroupCount[2],
+             properties.limits.maxComputeWorkGroupInvocations);
 }
 
 void Instance::CollectPhysicalMemoryInfo() {
