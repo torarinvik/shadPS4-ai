@@ -124,8 +124,8 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 ## TIER 4 — Diagnostics infrastructure (force-multipliers)
 94. [~] Plumb all device limits into host_diagnostics.h so checks use real limits (dispatch ceiling raised; full plumbing pending).
 95. [ ] Global ring buffer of the last N GPU ops (copy/dispatch/draw/free) dumped on device loss for instant attribution.
-96. [ ] Rate-limit every check (log each unique signature once) - avoids the 1653/643 log floods.
-97. [ ] One env SHADPS4_GPU_VALIDATION=off|warn|assert controlling all checks uniformly.
+96. [x] Rate-limit every check (log each unique signature once) - avoids the 1653/643 log floods.
+97. [x] One env SHADPS4_GPU_VALIDATION=off|warn|assert controlling all checks uniformly.
 98. [ ] Tag each GPU command with its originating subsystem (RefreshImage/Detile/FSR/Present) in logs.
 99. [ ] Add "ticks since last successful present" to the device-loss log.
 100. [ ] Env-gated one-shot Metal frame-capture trigger at a target bind count.

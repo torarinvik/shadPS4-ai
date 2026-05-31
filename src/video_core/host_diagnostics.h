@@ -12,14 +12,27 @@
 // logs/asserts, it never alters the command or any resource, so it can never change rendering
 // behavior or introduce a regression.
 //
-// Severity model:
-//   * A warning is always emitted (cheap; visible in normal runs so issues can be grepped).
-//   * A hard assert fires only under SHADPS4_STRICT_RENDER_VALIDATION, so normal/release runs are
-//     never aborted by a diagnostic.
+// Severity model (controlled uniformly by SHADPS4_GPU_VALIDATION=off|warn|assert; default warn):
+//   * warn  - a warning is logged (rate-limited to one line per unique finding) and the run
+//             continues. Visible in normal runs so issues can be grepped.
+//   * assert- additionally aborts (for CI / strict debugging).
+//   * off   - no logging or asserting.
+// SHADPS4_STRICT_RENDER_VALIDATION=1 is honored as an alias for assert mode (back-compat).
 //
-// Usage: include this header and call the DIAG_* helpers next to copy/dispatch/bind recording.
+// Every check is PURE (log/assert only; never alters a command or resource) so it cannot regress
+// rendering. Findings are de-duplicated by a key so a repeating problem (the menu churn produced
+// 1653 / 643 identical warnings) logs a single line.
+//
+// Usage: include this header and call the Check* helpers next to copy/dispatch/bind recording.
 
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
 #include <span>
+#include <string>
+#include <string_view>
+#include <unordered_set>
+#include <fmt/format.h>
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/trace_control.h"
@@ -31,6 +44,49 @@ namespace VideoCore::Diag {
 [[nodiscard]] inline bool StrictValidation() {
     static const bool enabled = Common::Trace::EnvEnabled("SHADPS4_STRICT_RENDER_VALIDATION");
     return enabled;
+}
+
+enum class Mode { Off, Warn, Assert };
+
+// Uniform severity control for all diagnostics (#97). SHADPS4_GPU_VALIDATION=off|warn|assert.
+[[nodiscard]] inline Mode ValidationMode() {
+    static const Mode mode = [] {
+        if (const char* v = std::getenv("SHADPS4_GPU_VALIDATION")) {
+            if (std::strcmp(v, "off") == 0 || std::strcmp(v, "0") == 0) {
+                return Mode::Off;
+            }
+            if (std::strcmp(v, "assert") == 0) {
+                return Mode::Assert;
+            }
+            return Mode::Warn;
+        }
+        return StrictValidation() ? Mode::Assert : Mode::Warn;
+    }();
+    return mode;
+}
+
+// Rate limiter (#96): returns true the first time `key` is seen, false afterwards. Thread-safe.
+// Inline-function statics have one shared instance across translation units.
+[[nodiscard]] inline bool FirstReport(std::string_view key) {
+    static std::mutex mutex;
+    static std::unordered_set<std::string> seen;
+    std::scoped_lock lk(mutex);
+    return seen.emplace(key).second;
+}
+
+// Central reporting for a diagnostic finding: honors the validation mode and rate-limits each
+// unique `key` to one log line. `msg` is the human-readable detail.
+inline void ReportOnce(std::string_view key, const std::string& msg) {
+    const Mode mode = ValidationMode();
+    if (mode == Mode::Off) {
+        return;
+    }
+    if (FirstReport(key)) {
+        LOG_WARNING(Render_Vulkan, "{}", msg);
+    }
+    if (mode == Mode::Assert) {
+        ASSERT_MSG(false, "GPU validation: {}", msg);
+    }
 }
 
 // When SHADPS4_TRACE_FREES=1, GPU-resource destructions are logged at the moment they actually run
@@ -152,15 +208,12 @@ inline bool CheckBufferImageCopies(const char* site, u64 guest_addr, vk::Format 
                                  ((rows + block - 1) / block) * slices;
         if (required > buffer_size) {
             bad = true;
-            LOG_WARNING(Render_Vulkan,
-                        "[{}] buffer<->image copy out of bounds: addr={:#x} host_format={} "
-                        "required={} buffer_size={} bufferOffset={} texel_bytes={}",
-                        site, guest_addr, vk::to_string(host_format), required, buffer_size,
-                        static_cast<u64>(copy.bufferOffset), texel_bytes);
-            ASSERT_MSG(!StrictValidation(),
-                       "Strict render validation: [{}] buffer<->image copy OOB addr={:#x} "
-                       "required={} buffer_size={}",
-                       site, guest_addr, required, buffer_size);
+            ReportOnce(
+                fmt::format("bufimg:{}:{}", site, vk::to_string(host_format)),
+                fmt::format("[{}] buffer<->image copy out of bounds: addr={:#x} host_format={} "
+                            "required={} buffer_size={} bufferOffset={} texel_bytes={}",
+                            site, guest_addr, vk::to_string(host_format), required, buffer_size,
+                            static_cast<u64>(copy.bufferOffset), texel_bytes));
         }
     }
     return bad;
@@ -176,16 +229,12 @@ inline bool CheckImageSubresources(const char* site, u64 guest_addr, u32 image_l
         if (sub.mipLevel >= image_levels || sub.baseArrayLayer + sub.layerCount > image_layers ||
             sub.layerCount == 0) {
             bad = true;
-            LOG_WARNING(Render_Vulkan,
-                        "[{}] image copy subresource out of bounds: addr={:#x} mip={} levels={} "
-                        "base_layer={} layer_count={} layers={}",
-                        site, guest_addr, sub.mipLevel, image_levels, sub.baseArrayLayer,
-                        sub.layerCount, image_layers);
-            ASSERT_MSG(!StrictValidation(),
-                       "Strict render validation: [{}] image copy subresource OOB addr={:#x} "
-                       "mip={} levels={} end_layer={} layers={}",
-                       site, guest_addr, sub.mipLevel, image_levels,
-                       sub.baseArrayLayer + sub.layerCount, image_layers);
+            ReportOnce(
+                fmt::format("subres:{}", site),
+                fmt::format("[{}] image copy subresource out of bounds: addr={:#x} mip={} levels={} "
+                            "base_layer={} layer_count={} layers={}",
+                            site, guest_addr, sub.mipLevel, image_levels, sub.baseArrayLayer,
+                            sub.layerCount, image_layers));
         }
     }
     return bad;
@@ -197,14 +246,11 @@ inline bool CheckBufferCopy(const char* site, u64 src_size, u64 dst_size, u64 sr
     bool bad = false;
     if (src_offset + size > src_size || dst_offset + size > dst_size || size == 0) {
         bad = true;
-        LOG_WARNING(Render_Vulkan,
-                    "[{}] buffer copy out of bounds: src_off={} dst_off={} size={} src_size={} "
-                    "dst_size={}",
-                    site, src_offset, dst_offset, size, src_size, dst_size);
-        ASSERT_MSG(!StrictValidation(),
-                   "Strict render validation: [{}] buffer copy OOB src_off={} dst_off={} size={} "
-                   "src_size={} dst_size={}",
-                   site, src_offset, dst_offset, size, src_size, dst_size);
+        ReportOnce(
+            fmt::format("bufcopy:{}", site),
+            fmt::format("[{}] buffer copy out of bounds: src_off={} dst_off={} size={} src_size={} "
+                        "dst_size={}",
+                        site, src_offset, dst_offset, size, src_size, dst_size));
     }
     return bad;
 }
@@ -215,12 +261,11 @@ inline bool CheckBufferRange(const char* site, u64 buffer_size, u64 offset, u64 
     bool bad = false;
     if (range != VK_WHOLE_SIZE && offset + range > buffer_size) {
         bad = true;
-        LOG_WARNING(Render_Vulkan,
-                    "[{}] buffer descriptor range out of bounds: offset={} range={} buffer_size={}",
-                    site, offset, range, buffer_size);
-        ASSERT_MSG(!StrictValidation(),
-                   "Strict render validation: [{}] buffer range OOB offset={} range={} size={}",
-                   site, offset, range, buffer_size);
+        ReportOnce(
+            fmt::format("bufrange:{}", site),
+            fmt::format("[{}] buffer descriptor range out of bounds: offset={} range={} "
+                        "buffer_size={}",
+                        site, offset, range, buffer_size));
     }
     return bad;
 }
@@ -233,18 +278,16 @@ inline bool CheckBufferRange(const char* site, u64 buffer_size, u64 offset, u64 
 inline bool CheckDispatch(const char* site, u32 x, u32 y, u32 z, u32 max_groups = (1u << 28)) {
     bool bad = false;
     if (x == 0 || y == 0 || z == 0) {
-        LOG_WARNING(Render_Vulkan, "[{}] compute dispatch has a zero dimension: {}x{}x{}", site, x,
-                    y, z);
         bad = true;
+        ReportOnce(fmt::format("dispatch0:{}", site),
+                   fmt::format("[{}] compute dispatch has a zero dimension: {}x{}x{}", site, x, y, z));
     }
     if (x > max_groups || y > max_groups || z > max_groups) {
         bad = true;
-        LOG_WARNING(Render_Vulkan,
-                    "[{}] compute dispatch exceeds {} groups per dim: {}x{}x{} (may GPU-timeout)",
-                    site, max_groups, x, y, z);
-        ASSERT_MSG(!StrictValidation(),
-                   "Strict render validation: [{}] oversized dispatch {}x{}x{} (max {})", site, x, y,
-                   z, max_groups);
+        ReportOnce(fmt::format("dispatchmax:{}", site),
+                   fmt::format("[{}] compute dispatch exceeds {} groups per dim: {}x{}x{} (may "
+                               "GPU-timeout)",
+                               site, max_groups, x, y, z));
     }
     return bad;
 }
