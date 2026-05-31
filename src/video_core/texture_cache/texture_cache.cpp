@@ -5,6 +5,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <span>
 
 #include <magic_enum/magic_enum.hpp>
 
@@ -203,6 +204,83 @@ static u32 NullImageBitsPerBlock(vk::Format format) {
     default:
         return 32;
     }
+}
+
+// Diagnostic: verify buffer->image copy regions won't read past the source buffer. Mirrors
+// Metal's copyBufferToImage source-size requirement on the CPU, so an over-read (e.g. when a guest
+// format is substituted for a larger host one, like D16UnormS8Uint -> D32SfloatS8Uint) is caught
+// at the recording site with full context, instead of surfacing later as an asynchronous,
+// hard-to-attribute GPU device loss (kIOGPUCommandBufferCallbackErrorInvalidResource). Pure check:
+// it never alters the copy. Always logs a warning; asserts only under strict render validation.
+// Returns true if any region would over-read.
+static bool ValidateBufferToImageBounds(const char* site, const ImageInfo& info,
+                                        vk::Format host_format,
+                                        std::span<const vk::BufferImageCopy> copies,
+                                        u64 src_buffer_size) {
+    // Bytes a single texel/block contributes for the copy's aspect under the HOST format. Depth/
+    // stencil formats are PLANAR: a depth-aspect copy moves only the depth plane (D16=2, D24/D32=4
+    // bytes), a stencil-aspect copy only the 1-byte stencil plane. Using the combined depth+stencil
+    // size here would double-count and false-positive (e.g. D32SfloatS8Uint depth copies). Color/
+    // block formats use their full block size.
+    const auto aspect_bytes = [](vk::Format fmt, vk::ImageAspectFlags aspect) -> u64 {
+        const bool depth = bool(aspect & vk::ImageAspectFlagBits::eDepth);
+        const bool stencil = bool(aspect & vk::ImageAspectFlagBits::eStencil);
+        if (stencil && !depth) {
+            return 1; // stencil plane only
+        }
+        if (depth) {
+            switch (fmt) {
+            case vk::Format::eD16Unorm:
+            case vk::Format::eD16UnormS8Uint:
+                return 2;
+            case vk::Format::eD32Sfloat:
+            case vk::Format::eD32SfloatS8Uint:
+            case vk::Format::eD24UnormS8Uint:
+            case vk::Format::eX8D24UnormPack32:
+                return 4;
+            default:
+                break;
+            }
+        }
+        return std::max<u64>(NullImageBitsPerBlock(fmt) / 8u, 1u);
+    };
+    // For block-compressed formats the copy's row length / extent are in TEXELS but the buffer is
+    // addressed in BLOCKS (a 4x4 texel block), so divide by the block dimensions. Non-block and
+    // depth/stencil formats use a 1x1 block.
+    const u32 block_dim = IsBlockFormat(host_format) ? 4u : 1u;
+    bool over_read = false;
+    for (const auto& copy : copies) {
+        const u64 texel_bytes =
+            aspect_bytes(host_format, copy.imageSubresource.aspectMask);
+        const u64 row_texels =
+            copy.bufferRowLength ? copy.bufferRowLength : copy.imageExtent.width;
+        const u64 rows = copy.bufferImageHeight ? copy.bufferImageHeight : copy.imageExtent.height;
+        const u64 slices = std::max<u32>(copy.imageExtent.depth, 1u) *
+                           std::max<u32>(copy.imageSubresource.layerCount, 1u);
+        const u64 blocks_per_row = (row_texels + block_dim - 1) / block_dim;
+        const u64 block_rows = (rows + block_dim - 1) / block_dim;
+        const u64 required = static_cast<u64>(copy.bufferOffset) +
+                             texel_bytes * blocks_per_row * block_rows * slices;
+        if (required > src_buffer_size) {
+            over_read = true;
+            LOG_WARNING(Render_Vulkan,
+                        "[{}] buffer->image copy over-reads source buffer: addr={:#x} "
+                        "guest_format={} host_format={} required={} src_buffer_size={} "
+                        "bufferOffset={} row_texels={} rows={} slices={} texel_bytes={} aspect={} "
+                        "is_tiled={} is_depth={}",
+                        site, info.guest_address, vk::to_string(info.pixel_format),
+                        vk::to_string(host_format), required, src_buffer_size,
+                        static_cast<u64>(copy.bufferOffset), row_texels, rows, slices, texel_bytes,
+                        vk::to_string(copy.imageSubresource.aspectMask), info.props.is_tiled,
+                        info.props.is_depth);
+            ASSERT_MSG(!IsStrictRenderValidationEnabled(),
+                       "Strict render validation: [{}] buffer->image copy over-reads source buffer "
+                       "addr={:#x} required={} src_buffer_size={} host_format={}",
+                       site, info.guest_address, required, src_buffer_size,
+                       vk::to_string(host_format));
+        }
+    }
+    return over_read;
 }
 
 static bool IsTraceMetaDataRegisterEnabled() {
@@ -1196,6 +1274,30 @@ void TextureCache::RefreshImage(Image& image) {
         tile_manager.DetileImage(in_buffer->Handle(), in_offset, image.info);
     for (auto& copy : image_copies) {
         copy.bufferOffset += offset;
+    }
+
+    // Catch (and skip) a buffer->image over-read here at the recording site, rather than letting
+    // it surface as a later asynchronous GPU device loss. For tiled images DetileImage returns its
+    // scratch buffer (sized guest_size, offset 0); for linear images it returns the buffer-cache
+    // buffer directly. The over-read happens for a format-substituted depth surface whose guest
+    // texels are narrower than the host ones (e.g. D16 depth -> host D32, 2x), so the host-format
+    // copy reads past the guest-sized source buffer. That upload is meaningless anyway (the guest
+    // bytes don't match the host depth layout, and for the aliased surface they actually hold
+    // non-depth data), so skipping it loses nothing while keeping the GPU-rendered content and
+    // avoiding the device loss. The check is aspect/block accurate (no false positives), so this
+    // only triggers on a genuine over-read.
+    {
+        const vk::Format host_format =
+            instance.GetSupportedFormat(image.info.pixel_format, image.format_features);
+        const u64 src_buffer_size = image.info.props.is_tiled
+                                        ? static_cast<u64>(image.info.guest_size)
+                                        : static_cast<u64>(in_buffer->SizeBytes());
+        if (ValidateBufferToImageBounds("RefreshImage.Upload", image.info, host_format,
+                                        image_copies, src_buffer_size)) {
+            image.flags &= ~ImageFlagBits::Dirty;
+            tile_manager.ReleasePendingScratchBuffers();
+            return;
+        }
     }
 
     image.Upload(image_copies, buffer, offset);

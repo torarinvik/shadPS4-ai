@@ -30,6 +30,31 @@ static bool ShouldAbortCopyLayerCoercion() {
     return IsStrictRenderValidationEnabled() && enabled;
 }
 
+// Diagnostic: image copy subresources must lie within the image's mip/layer range. An out-of-
+// bounds mip or layer makes the GPU access memory past the image and faults the command buffer
+// (device loss). Catch it at the recording site rather than as an opaque async GPU error. Warns
+// always; asserts under strict render validation. Pure check.
+static void ValidateCopySubresources(const char* site, const ImageInfo& info,
+                                     std::span<const vk::BufferImageCopy> copies) {
+    for (const auto& copy : copies) {
+        const auto& sub = copy.imageSubresource;
+        const u32 end_layer = sub.baseArrayLayer + sub.layerCount;
+        if (sub.mipLevel >= info.resources.levels || end_layer > info.resources.layers ||
+            sub.layerCount == 0) {
+            LOG_WARNING(Render_Vulkan,
+                        "[{}] image copy subresource out of bounds: addr={:#x} mip={} "
+                        "image_levels={} base_layer={} layer_count={} image_layers={}",
+                        site, info.guest_address, sub.mipLevel, info.resources.levels,
+                        sub.baseArrayLayer, sub.layerCount, info.resources.layers);
+            ASSERT_MSG(!IsStrictRenderValidationEnabled(),
+                       "Strict render validation: [{}] image copy subresource OOB addr={:#x} "
+                       "mip={} image_levels={} end_layer={} image_layers={}",
+                       site, info.guest_address, sub.mipLevel, info.resources.levels, end_layer,
+                       info.resources.layers);
+        }
+    }
+}
+
 static bool CanDirectCopyImageFormats(const ImageInfo& src_info, const ImageInfo& dst_info,
                                       vk::ImageAspectFlags src_aspect,
                                       vk::ImageAspectFlags dst_aspect) {
@@ -420,6 +445,7 @@ void Image::Transit(vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
 
 void Image::Upload(std::span<const vk::BufferImageCopy> upload_copies, vk::Buffer buffer,
                    u64 offset) {
+    ValidateCopySubresources("Image::Upload", info, upload_copies);
     SetBackingSamples(info.num_samples, false);
     scheduler->EndRendering();
 
@@ -466,6 +492,7 @@ void Image::Upload(std::span<const vk::BufferImageCopy> upload_copies, vk::Buffe
 
 void Image::Download(std::span<const vk::BufferImageCopy> download_copies, vk::Buffer buffer,
                      u64 offset, u64 download_size) {
+    ValidateCopySubresources("Image::Download", info, download_copies);
     SetBackingSamples(info.num_samples);
     scheduler->EndRendering();
 
