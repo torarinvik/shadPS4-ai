@@ -143,6 +143,8 @@ void BufferCache::DownloadBufferMemory(Buffer& buffer, VAddr device_addr, u64 si
     download_buffer.Commit();
     scheduler.EndRendering();
     const auto cmdbuf = scheduler.CommandBuffer();
+    VideoCore::Diag::CheckBufferCopyRegions("BufferCache.Download", buffer.SizeBytes(),
+                                            download_buffer.SizeBytes(), copies);
     cmdbuf.copyBuffer(buffer.buffer, download_buffer.Handle(), copies);
     const auto write_data = [&]() {
         auto* memory = Core::Memory::Instance();

@@ -31,8 +31,8 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 16. [x] Buffer->image upload bounds. (extend to stencil-only-aspect copies)
 17. [x] Image->buffer download bounds. (verify against true dst buffer size)
 18. [ ] Image->image copyImage: validate src+dst subresource ranges and src extent fits dst.
-19. [~] Buffer->buffer bounds at all buffer_cache copy sites (done: Copy, ExpandOverlap; todo: 145, 769, 960).
-20. [ ] fillBuffer/updateBuffer: offset+size <= buffer size, size %4 == 0.
+19. [~] Buffer->buffer bounds at buffer_cache copy sites (done: Copy, ExpandOverlap, Download; todo: SynchronizeBuffer - source is a raw handle without a size).
+20. [x] fillBuffer bounds (Buffer::Fill: offset+size <= buffer size; %4 already asserted).
 21. [ ] blitImage: regions within extents; filter/format compatibility.
 22. [ ] clearColorImage/clearDepthStencilImage: subresource in bounds + legal layout.
 23. [ ] Validate bufferOffset alignment for copyBufferToImage/copyImageToBuffer (Metal per-format alignment).

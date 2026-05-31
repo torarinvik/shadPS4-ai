@@ -255,6 +255,24 @@ inline bool CheckBufferCopy(const char* site, u64 src_size, u64 dst_size, u64 sr
     return bad;
 }
 
+// Verify a set of buffer->buffer copy regions stay within both buffers.
+inline bool CheckBufferCopyRegions(const char* site, u64 src_size, u64 dst_size,
+                                   std::span<const vk::BufferCopy> regions) {
+    bool bad = false;
+    for (const auto& r : regions) {
+        if (static_cast<u64>(r.srcOffset) + r.size > src_size ||
+            static_cast<u64>(r.dstOffset) + r.size > dst_size || r.size == 0) {
+            bad = true;
+            ReportOnce(fmt::format("bufcopyregions:{}", site),
+                       fmt::format("[{}] buffer copy region out of bounds: src_off={} dst_off={} "
+                                   "size={} src_size={} dst_size={}",
+                                   site, static_cast<u64>(r.srcOffset), static_cast<u64>(r.dstOffset),
+                                   static_cast<u64>(r.size), src_size, dst_size));
+        }
+    }
+    return bad;
+}
+
 // Verify a buffer descriptor range stays within the buffer. Catches a shader being handed a UBO/SSBO
 // range that reads past its backing buffer.
 inline bool CheckBufferRange(const char* site, u64 buffer_size, u64 offset, u64 range) {
