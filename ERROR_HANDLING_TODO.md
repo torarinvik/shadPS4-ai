@@ -55,7 +55,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 
 ## TIER 2 — Descriptor & binding validity
 38. [ ] BindTextures: assert each bound view handle non-null and its image not pending-destroy.
-39. [ ] Every UBO/SSBO descriptor range <= backing buffer size.
+39. [x] Every UBO/SSBO descriptor range <= backing buffer size (BindUBO/BindSSBO at the ObtainBuffer bind path).
 40. [ ] Sampled images in a shader-read-compatible layout at bind (not Undefined/TransferDst).
 41. [ ] Storage images bound with eStorage usage + storage-compatible format on MoltenVK.
 42. [ ] Detect a depth image bound as a storage image (Metal forbids) - warn/skip.

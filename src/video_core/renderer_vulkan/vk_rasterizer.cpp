@@ -896,6 +896,8 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
             const u32 adjust = offset - offset_aligned;
             ASSERT(adjust % 4 == 0);
             push_data.AddOffset(binding.buffer, adjust);
+            VideoCore::Diag::CheckBufferRange(is_storage ? "BindSSBO" : "BindUBO",
+                                              vk_buffer->SizeBytes(), offset_aligned, size + adjust);
             buffer_infos.emplace_back(vk_buffer->Handle(), offset_aligned, size + adjust);
             if (auto barrier =
                     vk_buffer->GetBarrier(desc.is_written ? vk::AccessFlagBits2::eShaderWrite
