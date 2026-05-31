@@ -255,6 +255,30 @@ inline bool CheckBufferCopy(const char* site, u64 src_size, u64 dst_size, u64 sr
     return bad;
 }
 
+// Verify image->image copy regions' src/dst subresources lie within each image's mip/layer range.
+inline bool CheckImageCopy(const char* site, u64 src_addr, u32 src_levels, u32 src_layers,
+                           u64 dst_addr, u32 dst_levels, u32 dst_layers,
+                           std::span<const vk::ImageCopy> regions) {
+    bool bad = false;
+    for (const auto& r : regions) {
+        const auto& s = r.srcSubresource;
+        const auto& d = r.dstSubresource;
+        if (s.mipLevel >= src_levels || s.baseArrayLayer + s.layerCount > src_layers ||
+            d.mipLevel >= dst_levels || d.baseArrayLayer + d.layerCount > dst_layers ||
+            s.layerCount == 0 || d.layerCount == 0) {
+            bad = true;
+            ReportOnce(fmt::format("imgcopy:{}", site),
+                       fmt::format("[{}] image->image copy out of bounds: src_addr={:#x} "
+                                   "src_mip={}/{} src_layers={}+{}/{}  dst_addr={:#x} "
+                                   "dst_mip={}/{} dst_layers={}+{}/{}",
+                                   site, src_addr, s.mipLevel, src_levels, s.baseArrayLayer,
+                                   s.layerCount, src_layers, dst_addr, d.mipLevel, dst_levels,
+                                   d.baseArrayLayer, d.layerCount, dst_layers));
+        }
+    }
+    return bad;
+}
+
 // Verify a set of buffer->buffer copy regions stay within both buffers.
 inline bool CheckBufferCopyRegions(const char* site, u64 src_size, u64 dst_size,
                                    std::span<const vk::BufferCopy> regions) {

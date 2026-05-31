@@ -724,6 +724,10 @@ void Image::CopyImage(Image& src_image) {
     auto cmdbuf = scheduler->CommandBuffer();
 
     if (!regions.empty()) {
+        VideoCore::Diag::CheckImageCopy("Image::CopyImage", src_image.info.guest_address,
+                                        src_image.info.resources.levels,
+                                        src_image.info.resources.layers, info.guest_address,
+                                        info.resources.levels, info.resources.layers, regions);
         cmdbuf.copyImage(src_image.GetImage(), src_image.backing->state.layout, GetImage(),
                          backing->state.layout, regions);
     }
