@@ -1337,8 +1337,18 @@ void TextureCache::RegisterImage(ImageId image_id) {
     image.flags |= ImageFlagBits::Registered;
     total_used_memory += Common::AlignUp(image.info.guest_size, 1024);
     image.lru_id = lru_cache.Insert(image_id, gc_tick);
-    ForEachPage(image.info.guest_address, image.info.guest_size,
+    const VAddr guest_addr = image.info.guest_address;
+    ForEachPage(guest_addr, image.info.guest_size,
                 [this, image_id](u64 page) { page_table[page].push_back(image_id); });
+    // Aliasing-storm gauge: warn when many images overlap one guest page simultaneously (the
+    // depth<->color reinterpret / size-ratchet aliasing that drives churn + the render corruption).
+    if (const auto* ids = page_table.find(guest_addr >> PageShift); ids != nullptr &&
+        ids->size() >= 16) {
+        VideoCore::Diag::ReportOnce(
+            fmt::format("alias_storm:{:#x}", guest_addr),
+            fmt::format("{}+ images overlap the guest page of {:#x} simultaneously (aliasing storm)",
+                        ids->size(), guest_addr));
+    }
 }
 
 void TextureCache::UnregisterImage(ImageId image_id) {
