@@ -146,10 +146,11 @@ void BufferCache::DownloadBufferMemory(Buffer& buffer, VAddr device_addr, u64 si
     const auto cmdbuf = scheduler.CommandBuffer();
     VideoCore::Diag::CheckBufferCopyRegions("BufferCache.Download", buffer.SizeBytes(),
                                             download_buffer.SizeBytes(), copies);
-    Vulkan::RecordGpuCommandDiagnostic("copy_buffer_download src_addr=0x%llx size=%llu regions=%zu",
-                                       static_cast<unsigned long long>(buffer.CpuAddr()),
-                                       static_cast<unsigned long long>(buffer.SizeBytes()),
-                                       copies.size());
+    Vulkan::RecordGpuCommandDiagnostic(
+        "copy_buffer_download subsystem=cpu_readback src_usage=%s src_addr=0x%llx size=%llu "
+        "regions=%zu",
+        BufferTypeName(buffer.usage).data(), static_cast<unsigned long long>(buffer.CpuAddr()),
+        static_cast<unsigned long long>(buffer.SizeBytes()), copies.size());
     cmdbuf.copyBuffer(buffer.buffer, download_buffer.Handle(), copies);
     const auto write_data = [&]() {
         auto* memory = Core::Memory::Instance();
@@ -438,6 +439,13 @@ void BufferCache::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, 
     VideoCore::Diag::CheckBufferCopy("BufferCache.Copy", src_buffer.SizeBytes(),
                                      dst_buffer.SizeBytes(), region.srcOffset, region.dstOffset,
                                      region.size);
+    Vulkan::RecordGpuCommandDiagnostic(
+        "copy_buffer subsystem=guest_dma src_usage=%s dst_usage=%s src_addr=0x%llx "
+        "dst_addr=0x%llx size=%llu",
+        BufferTypeName(src_buffer.usage).data(), BufferTypeName(dst_buffer.usage).data(),
+        static_cast<unsigned long long>(src_buffer.CpuAddr()),
+        static_cast<unsigned long long>(dst_buffer.CpuAddr()),
+        static_cast<unsigned long long>(num_bytes));
     cmdbuf.copyBuffer(src_buffer.Handle(), dst_buffer.Handle(), region);
     const vk::BufferMemoryBarrier2 buf_barriers_after[2] = {
         {
@@ -648,6 +656,11 @@ void BufferCache::JoinOverlap(BufferId new_buffer_id, BufferId overlap_id,
     VideoCore::Diag::CheckBufferCopy("BufferCache.ExpandOverlap", overlap.SizeBytes(),
                                      new_buffer.SizeBytes(), copy.srcOffset, copy.dstOffset,
                                      copy.size);
+    Vulkan::RecordGpuCommandDiagnostic(
+        "copy_buffer subsystem=buffer_expand src_addr=0x%llx dst_addr=0x%llx size=%llu",
+        static_cast<unsigned long long>(overlap.CpuAddr()),
+        static_cast<unsigned long long>(new_buffer.CpuAddr()),
+        static_cast<unsigned long long>(copy.size));
     cmdbuf.copyBuffer(overlap.Handle(), new_buffer.Handle(), copy);
 
     boost::container::static_vector<vk::BufferMemoryBarrier2, 2> post_barriers{};
@@ -782,10 +795,12 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, VAddr device_addr, u32 size,
             .bufferMemoryBarrierCount = 1,
             .pBufferMemoryBarriers = &pre_barrier,
         });
-        Vulkan::RecordGpuCommandDiagnostic("copy_buffer_sync dst_addr=0x%llx size=%llu regions=%zu",
-                                           static_cast<unsigned long long>(buffer.CpuAddr()),
-                                           static_cast<unsigned long long>(buffer.SizeBytes()),
-                                           copies.size());
+        Vulkan::RecordGpuCommandDiagnostic(
+            "copy_buffer_sync subsystem=cpu_upload dst_usage=%s dst_addr=0x%llx size=%llu "
+            "regions=%zu",
+            BufferTypeName(buffer.usage).data(),
+            static_cast<unsigned long long>(buffer.CpuAddr()),
+            static_cast<unsigned long long>(buffer.SizeBytes()), copies.size());
         // src is the staging buffer UploadCopies built, sized total_size_bytes.
         VideoCore::Diag::CheckBufferCopyRegions("BufferCache.Sync", total_size_bytes,
                                                 buffer.SizeBytes(), copies);
@@ -980,6 +995,10 @@ void BufferCache::WriteDataBuffer(Buffer& buffer, VAddr address, const void* val
         .bufferMemoryBarrierCount = 1,
         .pBufferMemoryBarriers = &pre_barrier,
     });
+    Vulkan::RecordGpuCommandDiagnostic(
+        "copy_buffer subsystem=write_data dst_usage=%s dst_addr=0x%llx size=%u",
+        BufferTypeName(buffer.usage).data(), static_cast<unsigned long long>(buffer.CpuAddr()),
+        num_bytes);
     cmdbuf.copyBuffer(src_buffer, buffer.Handle(), copy);
     cmdbuf.pipelineBarrier2(vk::DependencyInfo{
         .dependencyFlags = vk::DependencyFlagBits::eByRegion,

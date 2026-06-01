@@ -36,6 +36,8 @@ enum class MemoryUsage {
     Stream,      ///< Requests device local host visible buffer, falling back host memory.
 };
 
+std::string_view BufferTypeName(MemoryUsage type);
+
 constexpr vk::BufferUsageFlags ReadFlags =
     vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eUniformBuffer |
     vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eVertexBuffer |
