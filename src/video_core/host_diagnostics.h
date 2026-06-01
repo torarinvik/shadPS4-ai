@@ -31,6 +31,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <fmt/format.h>
 #include "common/assert.h"
@@ -86,6 +87,38 @@ inline void ReportOnce(std::string_view key, const std::string& msg) {
     }
     if (mode == Mode::Assert) {
         ASSERT_MSG(false, "GPU validation: {}", msg);
+    }
+}
+
+// Track image recreations per guest address to surface the depth<->color aliasing churn behind the
+// intermittent device loss: ResolveDepthOverlap recreates+frees the surface at one address, and we
+// observed both high recreate counts and a monotonically growing size ratchet (8->10->12 MB at
+// 0x279620000). Warns once when an address crosses a recreate count (#5) or a size-growth run (#6).
+inline void NoteImageRecreate(const char* site, u64 guest_addr, u64 new_size) {
+    struct Rec {
+        u32 count = 0;
+        u64 last_size = 0;
+        u32 growths = 0;
+    };
+    static std::mutex mutex;
+    static std::unordered_map<u64, Rec> recs;
+    std::scoped_lock lk(mutex);
+    Rec& r = recs[guest_addr];
+    ++r.count;
+    if (r.last_size != 0 && new_size > r.last_size) {
+        ++r.growths;
+    }
+    r.last_size = new_size;
+    if (r.count == 64) {
+        ReportOnce(fmt::format("recreate_churn:{:#x}", guest_addr),
+                   fmt::format("[{}] image at {:#x} recreated {}+ times (depth/color alias churn)",
+                               site, guest_addr, r.count));
+    }
+    if (r.growths == 8) {
+        ReportOnce(
+            fmt::format("recreate_ratchet:{:#x}", guest_addr),
+            fmt::format("[{}] image at {:#x} recreate size ratcheting up ({} growths, now {} bytes)",
+                        site, guest_addr, r.growths, new_size));
     }
 }
 

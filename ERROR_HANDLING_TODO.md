@@ -15,8 +15,8 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 2. [ ] Single chokepoint around vmaDestroyBuffer/vmaDestroyImage; under a flag, validate no in-flight cmdbuf references it before freeing.
 3. [ ] Freed-handle poison list kept N frames; assert on bind that a handle isn't poisoned (bind-after-free).
 4. [x] Per-scheduler deferred-destroy queue-depth gauge; warns (rate-limited) when pending_ops exceeds 1024 (free-churn/stalled-drain). WarnDeferredQueueDepth, kept out of the hot header.
-5. [ ] Count per-frame image recreates per guest address in ResolveDepthOverlap/ExpandImage; warn when one address recreates >K/frame (churn driver).
-6. [ ] Warn on monotonically growing recreate sizes at one address (the ratchet: 8->10->12 MB at 0x279620000).
+5. [x] Count image recreates per guest address (NoteImageRecreate at ResolveDepthOverlap); warn once past 64 recreates (churn driver). (todo: also wire ExpandImage.)
+6. [x] Warn on a monotonically growing recreate-size ratchet at one address (8 consecutive growths) via NoteImageRecreate.
 7. [ ] SlotVector double-free guard: each slot id erased exactly once; add a generation counter validated at submit.
 8. [x] Frees recorded into the GPU-op ring with their registration tick (DeleteImage/DeleteBuffer), dumped on device loss; the device-loss failure path now logs target_tick/known_gpu_tick/current_tick to compare against FREE reg_tick entries.
 9. [ ] Assert DeleteImage/DeleteBuffer resource is Unregistered before the deferred destroy is queued.
@@ -81,7 +81,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 ## TIER 2 — Texture-cache & aliasing invariants
 59. [ ] Warn when >K images are registered at one guest address simultaneously.
 60. [ ] Assert ResolveDepthOverlap recreate frees exactly one old image per new.
-61. [ ] Count + warn on the "Unimplemented depth overlap copy" path leaving a sampled image uninitialized (fired 643x).
+61. [x] "Unimplemented depth overlap copy" path (leaves image uninitialized) now routes through ReportOnce - rate-limited + attributable per address (was a 643x flood).
 62. [ ] "Resolved to too-few-resources" path -> always-warn (currently strict-only).
 63. [ ] Warn on depth<->color reinterpret where bit-widths differ.
 64. [ ] GC must not free an image with tick_accessed_last == CurrentTick.

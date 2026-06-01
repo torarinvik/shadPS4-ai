@@ -603,6 +603,8 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
     if (recreate) {
         auto new_info = requested_info;
         new_info.resources = std::max(requested_info.resources, cache_image.info.resources);
+        VideoCore::Diag::NoteImageRecreate("ResolveDepthOverlap", new_info.guest_address,
+                                           new_info.guest_size);
         const auto new_image_id =
             slot_images.insert(instance, scheduler, blit_helper, slot_image_views, new_info);
         RegisterImage(new_image_id);
@@ -634,6 +636,16 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
                 cache_image.info.pixel_format, new_info.pixel_format, cache_image.GetImage(),
                 new_image.GetImage());
         } else {
+            // #61: this path leaves new_image's contents uninitialized (no copy performed). It
+            // fired 643x in one UFC 3 run; route through ReportOnce so it is rate-limited and
+            // attributable per address rather than flooding.
+            VideoCore::Diag::ReportOnce(
+                fmt::format("depth_overlap_uninit:{:#x}", new_info.guest_address),
+                fmt::format("Unimplemented depth overlap copy leaves image uninitialized: "
+                            "addr={:#x} old_format={} new_format={} old_samples={} new_samples={}",
+                            new_info.guest_address, vk::to_string(cache_image.info.pixel_format),
+                            vk::to_string(new_info.pixel_format), cache_image.info.num_samples,
+                            new_info.num_samples));
             LOG_WARNING(Render_Vulkan, "Unimplemented depth overlap copy");
             ASSERT_MSG(!IsStrictRenderValidationEnabled(),
                        "Strict render validation: unimplemented depth overlap copy requested "
