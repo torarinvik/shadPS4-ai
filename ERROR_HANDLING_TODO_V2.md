@@ -1,136 +1,142 @@
-# GPU / emulator error-handling backlog — v2 (2026-06-01)
+# GPU / emulator error-handling backlog — v2 (2026-06-01, refreshed)
 
-Re-prioritized after the UFC 3 device loss was fixed by the **freed-image reuse pool**
-(`47e3e36d`). The live blockers are now: (a) depth↔color aliasing **render corruption**
-(octagon shows only a clear color — draws skipped/surfaces uninitialized), (b) an **intermittent
-black-on-boot / no-audio** early failure, and (c) **reuse-pool stale-content safety**. ROI =
-how directly each catches/fixes a *current* failure class vs cost and false-positive risk.
+Re-prioritized after the **image-churn device loss was fixed by the freed-image reuse pool**
+(`47e3e36d`) and a diagnostic run pinned two *new, confirmed* live blockers:
 
-Severity model: **warn always** (cheap, greppable), **assert under `SHADPS4_GPU_VALIDATION=assert`
-/ `SHADPS4_STRICT_RENDER_VALIDATION`**. Checks are pure (never alter a command/resource) unless
-explicitly a fix. Logging now goes through the content-dedup sink (`bcec708d`), so high-volume
-warns no longer flood.
+- **(B) Residual intermittent device loss, NEW character.** The GPU-op ring dump on the latest loss
+  shows **zero image frees** in the last 512 ops (image churn is gone) — instead **474
+  `copy_buffer_sync` of 16 KB buffers**, a few draws/dispatches, **one `FREE buffer`**
+  (`0x284628000`, 16 KB), loss on **"Command Buffer 4"** detected at `swapchain_acquire`. So the same
+  churn class likely shifted to the **buffer** side (or a distinct cmd-buffer issue). Still
+  intermittent (this run crashed ~25 s; another reached the intro movie).
+- **(A) Octagon/menu render corruption.** Color **render-target lookup returns null** for
+  `0x280320000` (1920×1080 R8G8B8A8) and `0x281140000` (1600×900) → draws skipped → scene shows only
+  its clear color. NOT an overlap-resolve failure; the descriptor `image_id` is simply null at
+  `BeginRendering`.
 
+ROI = how directly each catches/fixes a *current* failure class vs cost and false-positive risk.
+Severity: **warn always**, **assert under `SHADPS4_GPU_VALIDATION=assert`/`SHADPS4_STRICT_RENDER_VALIDATION`**.
+Checks are pure unless explicitly a fix. Logging goes through the content-dedup sink (`bcec708d`).
 Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 
-## TIER 0 — Image reuse pool correctness & safety (new code, highest risk surface)
-1. [ ] Optionally clear/zero a recycled image on acquire (env-gated `SHADPS4_IMAGE_REUSE_POOL_CLEAR`) to test whether stale content causes the octagon/black-boot corruption.
-2. [ ] Assert a pooled image is GPU-idle when released (its owning Image's last-use tick is GPU-complete) — catches a release that skipped the deferred gate.
-3. [ ] Track + log pool stats (hits, misses, evictions, live bytes) under a flag; warn on pathological miss rates (key churn) or runaway live bytes.
-4. [ ] Validate the reused image's create-info byte-exactly matches the request (already keyed, but assert on the full vk::ImageCreateInfo to rule out a key field omission).
-5. [ ] Never pool images with external/shared memory or dedicated VideoOut backings; assert such images take the destroy path.
-6. [ ] Cap pool entries per-key (not just global) so one churning key can't evict everything else useful.
-7. [ ] Drain-on-pressure: when VMA reports budget pressure, drain the pool before failing an allocation.
-8. [ ] Verify the pool is fully drained at shutdown before `vmaDestroyAllocator` (assert pool empty in a debug build).
-9. [ ] Make the pool reuse deterministic for the same address surface (prefer the most-recently-released entry of a key) to maximize content-stability for persistent surfaces.
-10. [ ] Add a poison-on-evict check: assert an evicted VkImage handle is not still referenced anywhere (bind-after-evict tripwire).
+## TIER 0A — Residual device loss B (buffer-side churn / command buffer)
+1. [ ] Apply the reuse-pool idea to BUFFERS: recycle UniqueBuffer (VkBuffer+alloc) by exact create-info, same as images, to kill small-buffer vmaCreate/Destroy churn.
+2. [ ] Count + warn on per-frame buffer create/destroy churn per size-class (16 KB stream/util buffers dominate the ring); gauge whether buffer churn drives the loss.
+3. [ ] Tag each `copy_buffer_sync`/`copy_buffer_download` ring entry with the source subsystem (stream/util/uniform/GDS) so the 474/frame flood is attributable.
+4. [ ] On device loss, log WHICH command buffer index failed + map it to the scheduler (draw/present/flip) and its in-flight tick range.
+5. [ ] Record buffer FREEs in the ring already (done) — also record buffer CREATEs so a create/free pair at the same addr within N ops is flagged (churn signature).
+6. [ ] Validate `BufferCache::SynchronizeBuffer`'s src buffer size (the one copy site still unchecked — src is a raw handle) by threading the size through.
+7. [ ] Warn when the deferred-destroy queue for buffers exceeds a threshold (mirror the image gauge) — buffer free-churn detector.
+8. [ ] Add "ticks since last successful present" + failing-tick to the swapchain-acquire device-loss dump (present path has no tick log yet, unlike master_semaphore).
+9. [ ] Quarantine experiment (env-gated): defer buffer frees an extra K submits; if the loss recedes, it is buffer-free timing; if not, it is elsewhere.
+10. [ ] Check whether the loss correlates with a specific dispatch (e.g. `dispatch x=240 y=135` = 1080p detile/compute) referencing a just-freed/recycled buffer.
 
-## TIER 0 — Depth↔color aliasing render correctness (the octagon corruption)
-11. [ ] Count + warn (rate-limited) when a draw is skipped via `HasValidRenderAttachment` returning false, naming which attachment(s) were invalid and the pgm hash — pin which pass produces the clear-color-only frame.
-12. [ ] Log the full render-target set (formats, layouts, image ids, valid/invalid) at the first skipped draw of each frame — diagnostic for the octagon.
-13. [ ] Validate that the "Unimplemented depth overlap copy" path's resulting image is actually consumed before being written; warn if a sampled surface is read while still in Undefined/uninitialized layout.
-14. [ ] Implement the missing MSAA depth→color (and color→depth) reinterpret copy/resolve so the recreated surface has correct contents instead of garbage.
-15. [ ] Detect a render target bound with format incompatible with the bound pipeline's color/depth format and warn (the depth-format mismatch class) — needs the pipeline's real createInfo formats exposed.
-16. [ ] Warn when a color attachment's image is actually a depth image (or vice-versa) at BeginRendering.
-17. [ ] Validate attachment extents are mutually consistent (all >= render area) and warn on mismatch that would clip the scene.
-18. [ ] Track per-frame count of draws issued vs skipped; warn when >K% of draws in a frame are skipped (scene not rendering).
-19. [ ] Verify the depth target's htile/meta state is consistent after a depth↔color recreate (stale htile → wrong depth test → skipped/black geometry).
-20. [ ] Warn when a surface is sampled as a texture in the same pass it is bound as a render/depth target without a feedback-loop layout.
+## TIER 0B — Octagon/menu render corruption A (null color render target)
+11. [x] Name which color attachment is null + addr/format at BeginRendering, and which pipeline skips (mrt_mask) — done (`280befc1`); drove the diagnosis.
+12. [ ] Trace WHY `cb_descs[cb].image_id` is null: instrument `PrepareRenderState` / `FindRenderTarget` for `0x280320000`/`0x281140000` to log the lookup path that returns null.
+13. [ ] Warn when `FindImage`/`FindRenderTarget` returns null for a color buffer with a valid address (distinguish "no RT bound" from "RT lookup failed").
+14. [ ] Validate the color buffer's ImageInfo (format/extent/tiling) is well-formed before lookup; warn on a degenerate desc that can't resolve.
+15. [ ] Check if the null RT addr was recently freed-to-pool and not re-found (pool interaction with RT lookup) — rule the pool in/out for A.
+16. [ ] Log the full render-target set (all cb formats/ids/layouts + depth) at the first skipped draw of each frame.
+17. [ ] Per-frame skipped-vs-issued draw ratio; warn when >K% skipped (scene not rendering).
+18. [ ] Detect a color attachment whose image exists but whose view creation failed (null view vs null image — different bug).
+19. [ ] Verify htile/meta state after a depth↔color recreate (stale htile → wrong depth → skipped geometry).
+20. [ ] Env-gated one-shot Metal frame capture on first skipped-draw to grab the corrupt frame offline.
 
-## TIER 0 — Intermittent black-on-boot / no-audio diagnostics
-21. [ ] Early-boot watchdog: if N seconds pass after `sceVideoOutOpen` with no successful flip presenting non-blank content, log a structured "boot stalled" dump (last GPU op, last kernel call, audio state).
-22. [ ] Log the first N frames' present results + whether the presented image was blank/cleared vs had drawn content (cheap luminance/variance probe).
-23. [ ] Detect and warn when audio init (`sceAudioOutOpen`/Ngs2) does not occur within a boot window — distinguishes "no audio" from "audio failed".
-24. [ ] Capture and log any early exception/abort on non-GPU threads (Ajm, AvPlayer, MoviePlayer2) with thread + context instead of a bare terminate.
-25. [ ] A/B harness: a single env to disable the reuse pool (`SHADPS4_IMAGE_REUSE_POOL=0`) — already present; document + log which mode is active at boot.
-26. [ ] Determinism probe: log a hash of the first presented frame's content so black vs non-black boots are machine-distinguishable across runs.
-27. [ ] Warn if the first VideoOut buffer registered is never written by the GPU before its first flip (presenting uninitialized memory = black).
-28. [ ] Track whether the black-boot correlates with a specific shader compile failure or a skipped first draw (join with #11/#18).
+## TIER 0C — Image reuse pool correctness & safety (new code)
+21. [ ] Env-gated clear/zero of a recycled image on acquire to test stale-content as a cause of A / black-boot.
+22. [ ] Assert a pooled image is GPU-idle on release (owning tick GPU-complete).
+23. [ ] Pool stats (hits/misses/evictions/live bytes) under a flag; warn on pathological miss rate or runaway bytes.
+24. [ ] Never pool external/shared-memory or dedicated VideoOut backings; assert they take the destroy path.
+25. [ ] Per-key entry cap so one churning key can't evict everything useful.
+26. [ ] Drain-on-budget-pressure before failing an allocation.
+27. [ ] Assert pool empty at shutdown (debug) before `vmaDestroyAllocator`.
+28. [ ] Prefer most-recently-released entry of a key (content stability for persistent surfaces).
+29. [ ] Poison-on-evict tripwire: evicted handle must not still be referenced.
+30. [ ] Verify reused image's full create-info matches request byte-exactly (rule out a key field omission).
+
+## TIER 1 — Intermittent black-on-boot / no-audio
+31. [ ] Early-boot watchdog: N s after `sceVideoOutOpen` with no non-blank flip → structured "boot stalled" dump.
+32. [ ] Cheap luminance/variance probe per presented frame; log blank vs drawn.
+33. [ ] Warn if audio init (`sceAudioOutOpen`/Ngs2) doesn't occur within the boot window.
+34. [ ] Catch early non-GPU-thread aborts (Ajm/AvPlayer/MoviePlayer2) with thread+context, not bare terminate.
+35. [ ] Log which reuse-pool mode is active at boot (A/B clarity).
+36. [ ] Hash the first presented frame so black vs non-black boots are machine-distinguishable.
+37. [ ] Warn if the first VideoOut buffer is flipped before the GPU writes it (presenting uninitialized = black).
+38. [ ] Join black-boot with first skipped-draw / first shader-compile failure.
 
 ## TIER 1 — Render-attachment & pipeline validity
-29. [ ] Pipeline attachment formats match BeginRendering attachments (expose GraphicsPipeline createInfo formats; assert the depth-format mismatch class).
-30. [ ] Validate the bound depth image's aspect (depth/stencil) matches what the pipeline + draw expect.
-31. [ ] Warn on topologies/primitive types MoltenVK software-emulates (perf + correctness).
-32. [ ] Validate index type (16/32-bit) matches the bound index buffer's element size.
-33. [ ] Viewport/scissor within framebuffer; render area <= min attachment extent (extend the non-negative check already added).
-34. [ ] Validate color blend / write-mask state vs attachment count.
-35. [ ] Assert no draw is recorded outside an active render pass (begin/end rendering balance).
-36. [ ] Warn when a pipeline is compiled with a depth pixel format but no depth attachment is bound (the Metal setRenderPipelineState assert class).
-37. [ ] Validate fetch-shader vertex-attribute offsets/strides within the bound vertex buffers.
+39. [ ] Pipeline attachment formats match BeginRendering attachments (expose GraphicsPipeline createInfo formats; the depth-format mismatch class).
+40. [ ] Validate bound depth image aspect matches pipeline/draw expectation.
+41. [ ] Warn when a pipeline declares a depth pixel format but no depth attachment is bound (Metal setRenderPipelineState assert class).
+42. [ ] Index type (16/32-bit) matches bound index buffer element size.
+43. [ ] Viewport/scissor within framebuffer; render area <= min attachment extent (extend the non-negative check).
+44. [ ] Assert begin/end-rendering balance; no draw outside an active pass.
+45. [ ] Validate fetch-shader vertex-attribute offsets/strides within bound vertex buffers.
+46. [ ] Warn on topologies MoltenVK software-emulates.
+47. [ ] Color blend / write-mask state vs attachment count.
 
-## TIER 1 — Descriptor & binding validity
-38. [ ] Every UBO/SSBO descriptor range <= backing buffer size (done #39 earlier — re-verify after pool changes).
-39. [ ] Sampled images in a shader-read-compatible layout at bind (not Undefined/TransferDst) — warn; high signal for the octagon.
-40. [ ] Storage images bound with eStorage usage + storage-compatible format on MoltenVK.
-41. [ ] Detect a depth image bound as a storage image (Metal forbids) — warn/skip.
-42. [ ] Descriptor counts <= pool/layout limits before pushDescriptorSet.
-43. [ ] Push-constant size <= maxPushConstantsSize and the pipeline's declared range.
-44. [ ] Assert no descriptor binds a resource queued for deferred destroy this frame (partial via #14/#45 earlier — extend to image views).
-45. [ ] Sampler/vertex-buffer bindings reference live resources with consistent stride.
-46. [ ] Validate the shader's declared storage-image format matches the bound image format.
-47. [ ] Warn on a null bound image view that is NOT a legitimate null-descriptor (refine the existing null-view warn).
+## TIER 2 — Descriptor & binding validity
+48. [x] UBO/SSBO descriptor range <= backing buffer size (done #39).
+49. [ ] Sampled images in shader-read-compatible layout at bind (not Undefined/TransferDst) — high signal for A.
+50. [ ] Storage images bound with eStorage usage + storage-compatible format on MoltenVK.
+51. [ ] Detect a depth image bound as a storage image (Metal forbids) — warn/skip.
+52. [ ] Descriptor counts <= pool/layout limits before pushDescriptorSet.
+53. [ ] Push-constant size <= maxPushConstantsSize and pipeline range.
+54. [~] No descriptor binds a resource queued for deferred destroy (partial via #14/#45; extend to image views).
+55. [ ] Sampler/vertex-buffer bindings reference live resources with consistent stride.
+56. [ ] Shader's declared storage-image format matches bound image format.
+57. [~] Warn on a null bound image view that isn't a legitimate null-descriptor (done; refine).
 
 ## TIER 2 — Image/buffer state, layout & format
-48. [ ] Central Image::ValidateState() (layout != Undefined when sampled/attached, backing non-null, samples consistent) called at bind.
-49. [ ] Validate layout transitions are legal (source layout matches the image's tracked actual layout).
-50. [ ] Format-substitution guard: host != guest format -> assert usage is compatible (the D16->D32 class).
-51. [ ] Depth/stencil plane-size correctness for copies (asserted in the diagnostic; assert at source too).
-52. [ ] Image extent <= maxImageDimension2D/3D at creation.
-53. [ ] num_samples supported for the format+usage (already queried; assert the chosen sample count is supported).
-54. [ ] guest_size == sum of mips_layout (catches a malformed ImageInfo).
-55. [ ] Color-attachment-and-texture-in-same-pass uses feedback-loop layout (or warn) — see #20.
-56. [ ] Buffer usage flags include what the bind requires.
-57. [ ] image_view subresource subset of image range (done #57 earlier; keep).
-58. [ ] Tiling-mode/array-mode consistency before image reuse (now also before pool reuse).
+58. [ ] Central Image::ValidateState() (layout != Undefined when sampled/attached, backing non-null) at bind.
+59. [ ] Validate layout transitions legal (source matches tracked actual layout).
+60. [ ] Format-substitution guard: host != guest -> usage compatible (D16->D32 class).
+61. [ ] Depth/stencil plane-size correctness for copies (assert at source too).
+62. [ ] Image extent <= maxImageDimension2D/3D at creation.
+63. [ ] guest_size == sum of mips_layout.
+64. [ ] Color-attachment-and-texture-in-same-pass uses feedback-loop layout (or warn).
+65. [ ] Buffer usage flags include what the bind requires.
+66. [x] image_view subresource subset of image range (done #57).
+67. [ ] Tiling/array-mode consistency before image AND pool reuse.
+68. [ ] num_samples supported for format+usage (assert chosen sample count).
 
-## TIER 2 — Texture-cache & aliasing invariants
-59. [ ] Warn when >K images are registered at one guest address simultaneously (aliasing storm gauge).
-60. [ ] Assert ResolveDepthOverlap recreate frees/pools exactly one old image per new.
-61. [ ] Count + warn on the "Unimplemented depth overlap copy" path (done — routed through ReportOnce + dedup; keep as a frame-rate gauge).
-62. [ ] "Resolved to too-few-resources" path -> always-warn.
-63. [ ] Warn on depth<->color reinterpret where bit-widths differ (likely-wrong reinterpret).
-64. [ ] GC/pool must not reclaim an image with tick_accessed_last == CurrentTick.
-65. [ ] Page-table consistency: each registered image's pages map back to it.
-66. [ ] ExpandImage copy succeeded (or warn) — the size-ratchet path.
-67. [ ] Warn on per-frame full re-upload of GpuModified surfaces.
-68. [ ] Detect depth-as-texture reads early and route through a stable non-churning path (the pool now reduces churn; verify correctness).
+## TIER 3 — Texture-cache & aliasing invariants
+69. [ ] Warn when >K images registered at one guest address simultaneously.
+70. [ ] Assert ResolveDepthOverlap recreate frees/pools exactly one old per new.
+71. [x] "Unimplemented depth overlap copy" routed through ReportOnce+dedup (done; keep as gauge).
+72. [ ] "Resolved to too-few-resources" path -> always-warn.
+73. [ ] Warn on depth<->color reinterpret where bit-widths differ.
+74. [x] GC/pool must not reclaim an image with tick_accessed_last == CurrentTick (pool only releases post-gate).
+75. [ ] Page-table consistency: each registered image's pages map back to it.
+76. [ ] ExpandImage copy succeeded (or warn) — the size-ratchet path.
+77. [ ] Detect depth-as-texture reads early; verify the pool-stabilized path is correct.
 
-## TIER 3 — Memory, allocation & mapping
-69. [ ] Check every vmaCreate*/createImage result (done at all sites; re-verify the pool's reuse path can't return a stale/invalid handle).
-70. [ ] ObtainBuffer* returns a buffer covering [addr, addr+size); warn on partial coverage (the over-read class).
-71. [ ] Validate memory->IsValidMapping before host CopySparseMemory in the staging path.
-72. [ ] Track device memory used vs budget (incl. pooled idle images); warn approaching it.
-73. [ ] staging_buffer.Map wrap warning.
-74. [ ] Assert GDS/null/fault buffers are never freed/pooled.
-75. [ ] Descriptor buffer alignment (minUniformBufferOffsetAlignment, etc.).
-76. [ ] Make the buffer_cache "destination aliases cached image" warning actionable (count/throttle — now deduped).
+## TIER 3 — Memory / pipeline / PM4
+78. [x] Check every vmaCreate*/createImage result (done; re-verify the pool reuse path can't return a stale handle).
+79. [ ] ObtainBuffer* covers [addr, addr+size); warn on partial coverage (over-read class).
+80. [ ] Track device memory used vs budget incl. pooled idle images; warn approaching it.
+81. [ ] Assert GDS/null/fault buffers are never freed/pooled.
+82. [ ] Check graphics/compute pipeline creation results; log shader hash on failure.
+83. [ ] Shader resource bindings match pipeline-layout binding count/types.
+84. [ ] Validate PM4 packet sizes/opcodes in the command processor.
+85. [ ] Register-state coherence (depth_enable vs bound depth target).
 
-## TIER 3 — Pipeline, shader & PM4 stream
-77. [ ] Check graphics/compute pipeline creation results; log shader hash on failure.
-78. [ ] Shader resource bindings match pipeline-layout binding count/types.
-79. [ ] Validate PM4 packet sizes/opcodes in the command processor (the type-0/type-1 desync class seen in other titles).
-80. [ ] Register-state coherence checks (depth_enable vs bound depth target) — links to #36.
-81. [ ] Fetch-shader/vertex-attribute offsets within the vertex buffer (see #37).
-82. [ ] Heuristic warn on shaders with huge push-constant-driven loop bounds.
-83. [ ] Validate compute local-size declaration vs dispatch assumptions (done #29; keep).
-84. [ ] Validate render-pass attachment count vs pipeline colorAttachmentCount.
+## TIER 4 — Kernel / audio / CPU
+86. [ ] AjmWorker: replace "Unreachable code" abort with a logged recoverable error dumping codec/instruction (movie-audio crash).
+87. [ ] Bounds-check AJM decode in/out buffers; validate codec params.
+88. [ ] Catch the Rosetta synchronous-exception path; log x86 RIP+context instead of aborting.
+89. [ ] Validate AvPlayer/Videodec/MoviePlayer2 stub outputs don't feed garbage downstream.
+90. [ ] Bounds-check kernel mmap/munmap ranges against guest address space.
+91. [ ] Validate equeue/thread handles before use.
+92. [ ] SIGSEGV/SIGABRT watchdog dumping last GPU command + last kernel call.
+93. [ ] Second sceVideoOutOpen: explicitly support or cleanly reject.
 
-## TIER 3 — Kernel / libraries / audio / CPU
-85. [ ] AjmWorker: replace the "Unreachable code" abort with a logged, recoverable error dumping codec/instruction (movie-audio crash).
-86. [ ] Bounds-check AJM decode in/out buffers; validate codec params.
-87. [ ] Catch the Rosetta synchronous-exception path; log x86 RIP + context instead of aborting.
-88. [ ] Throttle FS "open() failed" spam to once-per-path (now also deduped globally; keep path-keyed counter).
-89. [ ] Second sceVideoOutOpen: explicitly support or cleanly reject.
-90. [ ] Validate AvPlayer/Videodec/MoviePlayer2 stub outputs don't feed garbage downstream (the movie path).
-91. [ ] Bounds-check kernel mmap/munmap ranges against the guest address space.
-92. [ ] Validate equeue/thread handles before use.
-93. [ ] SIGSEGV/SIGABRT watchdog dumping the last GPU command + last kernel call (extend the ring dump to signal handlers).
-
-## TIER 4 — Diagnostics infrastructure (force-multipliers)
-94. [ ] Plumb all real device limits into host_diagnostics.h (dispatch ceiling raised; full plumbing pending).
-95. [ ] GPU-op ring (done, 512 entries, dumps on device loss) — add per-op subsystem tag (RefreshImage/Detile/FSR/Present) and pool hit/miss.
-96. [ ] Rate-limit every check (done) + content-dedup logging (done) — extend dedup with an optional periodic "repeated N×" summary line.
-97. [ ] One env `SHADPS4_GPU_VALIDATION=off|warn|assert` controlling all checks (done; document).
-98. [ ] Tag each GPU command with its originating subsystem in logs (links #95).
-99. [ ] Add "ticks since last successful present" + "frames with drawn content" to the device-loss/boot-stall log.
-100. [ ] Env-gated one-shot Metal frame-capture trigger at a target bind count or on first skipped-draw — capture the octagon frame for offline analysis.
+## TIER 5 — Diagnostics infrastructure (force-multipliers)
+94. [x] GPU-op ring, dumps on device loss, 512 entries, frees+copies (done) — add subsystem tags + pool hit/miss.
+95. [x] Rate-limit every check + content-dedup logging (done) — add optional "repeated N×" summary on the deduped line.
+96. [x] One env `SHADPS4_GPU_VALIDATION=off|warn|assert` (done; document).
+97. [ ] Plumb all real device limits into host_diagnostics.h.
+98. [ ] Tag each GPU command with originating subsystem in logs (RefreshImage/Detile/FSR/Present).
+99. [ ] Add "frames with drawn content" + "skipped-draw ratio" to the boot-stall/device-loss log.
+100. [ ] Env-gated one-shot Metal frame-capture at a target bind count or on first skipped-draw / device loss.
