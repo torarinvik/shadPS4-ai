@@ -207,6 +207,21 @@ struct ImagePoolKeyHash {
     }
 };
 
+std::mutex image_view_reference_mutex;
+std::unordered_map<VkImage, u32> image_view_references;
+
+void AssertNoImageViewReferences(VkImage image, const char* reason) {
+    std::scoped_lock lk{image_view_reference_mutex};
+    const auto it = image_view_references.find(image);
+    if (it == image_view_references.end() || it->second == 0) {
+        return;
+    }
+    LOG_ERROR(Render_Vulkan,
+              "ImageReusePool {} tripwire: evicting image {} with {} live image views", reason,
+              fmt::ptr(image), it->second);
+    ASSERT_MSG(false, "ImageReusePool {} tripwire: evicting image with live image views", reason);
+}
+
 class ImageReusePool {
 public:
     static ImageReusePool& Get() {
@@ -255,6 +270,7 @@ public:
         while (bucket.size() > max_per_key_count) {
             const Entry e = bucket.front();
             bucket.erase(bucket.begin());
+            AssertNoImageViewReferences(e.image, "per-key-cap");
             vmaDestroyImage(allocator, e.image, e.allocation);
             total_bytes -= e.bytes;
             --total_count;
@@ -279,6 +295,7 @@ public:
         enabled = false;
         for (auto& [key, bucket] : entries) {
             for (const Entry& e : bucket) {
+                AssertNoImageViewReferences(e.image, "shutdown-drain");
                 vmaDestroyImage(allocator, e.image, e.allocation);
             }
         }
@@ -296,6 +313,7 @@ public:
         const u64 drained_bytes = total_bytes;
         for (auto& [key, bucket] : entries) {
             for (const Entry& e : bucket) {
+                AssertNoImageViewReferences(e.image, "pressure-drain");
                 vmaDestroyImage(allocator, e.image, e.allocation);
             }
         }
@@ -342,6 +360,7 @@ private:
             if (!bucket.empty()) {
                 const Entry e = bucket.front();
                 bucket.erase(bucket.begin());
+                AssertNoImageViewReferences(e.image, "budget");
                 vmaDestroyImage(allocator, e.image, e.allocation);
                 total_bytes -= e.bytes;
                 --total_count;
@@ -377,6 +396,27 @@ u64 ApproxImageBytes(const vk::ImageCreateInfo& ci) {
 
 void DrainImageReusePool(VmaAllocator allocator) {
     ImageReusePool::Get().Drain(allocator);
+}
+
+void RegisterImageViewReference(vk::Image image) {
+    if (!image) {
+        return;
+    }
+    std::scoped_lock lk{image_view_reference_mutex};
+    ++image_view_references[static_cast<VkImage>(image)];
+}
+
+void UnregisterImageViewReference(vk::Image image) {
+    if (!image) {
+        return;
+    }
+    std::scoped_lock lk{image_view_reference_mutex};
+    auto it = image_view_references.find(static_cast<VkImage>(image));
+    ASSERT(it != image_view_references.end());
+    ASSERT(it->second > 0);
+    if (--it->second == 0) {
+        image_view_references.erase(it);
+    }
 }
 
 UniqueImage::~UniqueImage() {

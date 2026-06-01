@@ -48,11 +48,12 @@ struct ImageView {
     ImageView(const ImageView&) = delete;
     ImageView& operator=(const ImageView&) = delete;
 
-    ImageView(ImageView&&) = default;
-    ImageView& operator=(ImageView&&) = default;
+    ImageView(ImageView&& other);
+    ImageView& operator=(ImageView&& other);
 
     ImageViewInfo info;
     vk::UniqueImageView image_view;
+    vk::Image image_handle{};
 };
 
 } // namespace VideoCore

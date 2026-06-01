@@ -12,6 +12,7 @@
 #include "video_core/texture_cache/image_view.h"
 
 #include <magic_enum/magic_enum.hpp>
+#include <utility>
 
 namespace VideoCore {
 
@@ -142,6 +143,7 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
             .layerCount = info.range.extent.layers,
         },
     };
+    image_handle = image_view_ci.image;
     const u32 end_level = info.range.base.level + info.range.extent.levels;
     const u32 end_layer = info.range.base.layer + info.range.extent.layers;
     const bool empty_range = info.range.extent.levels == 0 || info.range.extent.layers == 0;
@@ -213,6 +215,7 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     ASSERT_MSG(view_result == vk::Result::eSuccess, "Failed to create image view: {}",
                vk::to_string(view_result));
     image_view = std::move(view);
+    RegisterImageViewReference(image_handle);
 
     const auto view_aspect = aspect & vk::ImageAspectFlagBits::eDepth     ? "Depth"
                              : aspect & vk::ImageAspectFlagBits::eStencil ? "Stencil"
@@ -225,6 +228,23 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
         info.range.base.layer + info.range.extent.layers - 1, view_aspect);
 }
 
-ImageView::~ImageView() = default;
+ImageView::~ImageView() {
+    UnregisterImageViewReference(image_handle);
+}
+
+ImageView::ImageView(ImageView&& other)
+    : info{std::move(other.info)}, image_view{std::move(other.image_view)},
+      image_handle{std::exchange(other.image_handle, vk::Image{})} {}
+
+ImageView& ImageView::operator=(ImageView&& other) {
+    if (this == &other) {
+        return *this;
+    }
+    UnregisterImageViewReference(image_handle);
+    info = std::move(other.info);
+    image_view = std::move(other.image_view);
+    image_handle = std::exchange(other.image_handle, vk::Image{});
+    return *this;
+}
 
 } // namespace VideoCore
