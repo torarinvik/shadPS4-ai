@@ -38,8 +38,8 @@ inline bool IsGpuCommandDiagnosticsEnabled() {
     return enabled;
 }
 
-inline std::array<GpuCommandDiagnosticEntry, 64>& GpuCommandDiagnosticRing() {
-    static std::array<GpuCommandDiagnosticEntry, 64> ring{};
+inline std::array<GpuCommandDiagnosticEntry, 512>& GpuCommandDiagnosticRing() {
+    static std::array<GpuCommandDiagnosticEntry, 512> ring{};
     return ring;
 }
 
