@@ -31,6 +31,10 @@ public:
     /// Acquires the next image in the swapchain.
     bool AcquireNextImage();
 
+    void NotePendingFrameTick(u64 tick) noexcept {
+        pending_present_tick = tick;
+    }
+
     /// Presents the current image and move to the next one
     bool Present();
 
@@ -143,6 +147,9 @@ private:
     u32 image_count = 0;
     u32 image_index = 0;
     u32 frame_index = 0;
+    u64 pending_present_tick = 0;
+    u64 last_successful_present_tick = 0;
+    u64 successful_present_count = 0;
     bool needs_recreation = true;
     bool needs_hdr = false;    // The game requested HDR swapchain
     bool supports_hdr = false; // SC supports HDR output

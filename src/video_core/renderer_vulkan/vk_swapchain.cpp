@@ -155,6 +155,16 @@ bool Swapchain::AcquireNextImage() {
         // terminates via UNREACHABLE() WITHOUT dumping the GPU-op ring - the most common
         // device-loss exit for UFC 3. Dump the ring first so the last N ops (incl. frees with
         // ticks) are attributable before we abort.
+        const u64 ticks_since_present =
+            pending_present_tick >= last_successful_present_tick
+                ? pending_present_tick - last_successful_present_tick
+                : 0;
+        LOG_CRITICAL(Render_Vulkan,
+                     "[swapchain_acquire_device_loss] pending_present_tick={} "
+                     "last_successful_present_tick={} ticks_since_last_successful_present={} "
+                     "successful_present_count={} frame_index={} image_count={}",
+                     pending_present_tick, last_successful_present_tick, ticks_since_present,
+                     successful_present_count, frame_index, image_count);
         DumpSchedulerSubmitDiagnostics("swapchain_acquire_device_loss");
         DumpGpuCommandDiagnostics("swapchain_acquire_device_loss");
         UNREACHABLE();
@@ -185,6 +195,8 @@ bool Swapchain::Present() {
         LogGpuWaitFailure("swapchain_present", result);
         needs_recreation = true;
     } else {
+        last_successful_present_tick = pending_present_tick;
+        ++successful_present_count;
     }
 
     frame_index = (frame_index + 1) % image_count;
