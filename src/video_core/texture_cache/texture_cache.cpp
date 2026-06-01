@@ -720,6 +720,19 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
                 new_info.size.width, new_info.size.height, new_info.num_samples,
                 cache_image.info.pixel_format, new_info.pixel_format, cache_image.GetImage(),
                 new_image.GetImage());
+        } else if (cache_image.info.props.is_depth && !new_info.props.is_depth &&
+                   cache_image.info.num_samples == new_info.num_samples &&
+                   new_info.num_samples > 1) {
+            // Reinterpret a multisampled depth surface as color by writing the depth plane into
+            // the matching color attachment sample-by-sample.
+            cache_image.Transit(vk::ImageLayout::eShaderReadOnlyOptimal,
+                                vk::AccessFlagBits2::eShaderRead, {});
+            new_image.Transit(vk::ImageLayout::eColorAttachmentOptimal,
+                              vk::AccessFlagBits2::eColorAttachmentWrite, {});
+            blit_helper.ReinterpretMsDepthAsColor(
+                new_info.size.width, new_info.size.height, new_info.num_samples,
+                cache_image.info.pixel_format, new_info.pixel_format, cache_image.GetImage(),
+                new_image.GetImage());
         } else {
             // #61: this path leaves new_image's contents uninitialized (no copy performed). It
             // fired 643x in one UFC 3 run; route through ReportOnce so it is rate-limited and
