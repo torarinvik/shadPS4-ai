@@ -29,7 +29,6 @@
 
 namespace VideoCore {
 
-static constexpr u64 PageShift = 12;
 static constexpr u64 NumFramesBeforeRemoval = 32;
 
 static bool IsStrictRenderValidationEnabled() {
@@ -1378,7 +1377,7 @@ void TextureCache::RegisterImage(ImageId image_id) {
                 [this, image_id](u64 page) { page_table[page].push_back(image_id); });
     // Aliasing-storm gauge: warn when many images overlap one guest page simultaneously (the
     // depth<->color reinterpret / size-ratchet aliasing that drives churn + the render corruption).
-    if (const auto* ids = page_table.find(guest_addr >> PageShift); ids != nullptr &&
+    if (const auto* ids = page_table.find(guest_addr >> Traits::PageBits); ids != nullptr &&
         ids->size() >= 16) {
         VideoCore::Diag::ReportOnce(
             fmt::format("alias_storm:{:#x}", guest_addr),
@@ -1397,13 +1396,14 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     ForEachPage(image.info.guest_address, image.info.guest_size, [this, image_id](u64 page) {
         const auto page_it = page_table.find(page);
         if (page_it == nullptr) {
-            UNREACHABLE_MSG("Unregistering unregistered page=0x{:x}", page << PageShift);
+            UNREACHABLE_MSG("Unregistering unregistered page=0x{:x}", page << Traits::PageBits);
             return;
         }
         auto& image_ids = *page_it;
         const auto vector_it = std::ranges::find(image_ids, image_id);
         if (vector_it == image_ids.end()) {
-            ASSERT_MSG(false, "Unregistering unregistered image in page=0x{:x}", page << PageShift);
+            ASSERT_MSG(false, "Unregistering unregistered image in page=0x{:x}",
+                       page << Traits::PageBits);
             return;
         }
         image_ids.erase(vector_it);
