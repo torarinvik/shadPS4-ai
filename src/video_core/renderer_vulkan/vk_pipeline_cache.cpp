@@ -408,18 +408,24 @@ bool PipelineCache::RefreshGraphicsKey() {
     // Metal rejects setRenderPipelineState ("the renderPipelineState pixelFormat must be
     // MTLPixelFormatInvalid, as no texture is set") and faults the command buffer with
     // kIOGPUCommandBufferCallbackErrorInvalidResource (device loss). Gate the formats on the same
-    // condition the rasterizer uses to bind the attachment so the two never disagree.
+    // condition the rasterizer uses to bind each attachment so the two never disagree. Keep the
+    // image's full depth/stencil format when either aspect is attached: MoltenVK may substitute
+    // combined D/S images (for example D16S8 -> D32S8), and the pipeline attachment format must
+    // match the bound view even when only one aspect is enabled.
     const bool depth_attachment_bound =
         regs.depth_control.depth_enable && regs.depth_buffer.DepthValid();
     const bool stencil_attachment_bound =
         regs.depth_control.stencil_enable && regs.depth_buffer.StencilValid();
+    const bool ds_attachment_bound = depth_attachment_bound || stencil_attachment_bound;
 
-    key.z_format = depth_attachment_bound
+    key.z_format = (ds_attachment_bound && regs.depth_buffer.DepthValid())
                        ? regs.depth_buffer.z_info.format
                        : AmdGpu::DepthBuffer::ZFormat::Invalid;
-    key.stencil_format = stencil_attachment_bound
+    key.stencil_format = (ds_attachment_bound && regs.depth_buffer.StencilValid())
                              ? regs.depth_buffer.stencil_info.format
                              : AmdGpu::DepthBuffer::StencilFormat::Invalid;
+    key.depth_attachment_bound = depth_attachment_bound;
+    key.stencil_attachment_bound = stencil_attachment_bound;
     key.depth_clamp_enable = !regs.depth_render_override.disable_viewport_clamp;
     key.depth_clip_enable = regs.clipper_control.ZclipEnable();
     key.clip_space = regs.clipper_control.clip_space;

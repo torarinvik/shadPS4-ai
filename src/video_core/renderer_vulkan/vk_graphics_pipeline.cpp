@@ -255,10 +255,10 @@ GraphicsPipeline::GraphicsPipeline(
     }
     std::ranges::copy_n(color_formats.begin(), color_attachment_formats.size(),
                         color_attachment_formats.begin());
-    depth_attachment_format = key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid
+    depth_attachment_format = key.depth_attachment_bound
                                   ? depth_format
                                   : vk::Format::eUndefined;
-    stencil_attachment_format = key.stencil_format != AmdGpu::DepthBuffer::StencilFormat::Invalid
+    stencil_attachment_format = key.stencil_attachment_bound
                                     ? depth_format
                                     : vk::Format::eUndefined;
 
