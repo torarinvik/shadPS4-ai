@@ -40,7 +40,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 16. [x] Log the full render-target set (all cb formats/ids/layouts + depth) at the first skipped draw of each frame.
 17. [x] Per-frame skipped-vs-issued draw ratio; warn when >K% skipped (scene not rendering).
 18. [x] Detect a color attachment whose image exists but whose view creation failed (null view vs null image — different bug).
-19. [ ] Verify htile/meta state after a depth↔color recreate (stale htile → wrong depth → skipped geometry).
+19. [x] Verify htile/meta state after a depth↔color recreate (stale htile → wrong depth → skipped geometry).
 20. [ ] Env-gated one-shot Metal frame capture on first skipped-draw to grab the corrupt frame offline.
 
 ## TIER 0C — Image reuse pool correctness & safety (new code)

@@ -615,6 +615,42 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
         new_image.flags &= ~ImageFlagBits::Dirty;
         // When creating a depth buffer through overlap resolution don't clear it on first use.
         new_image.info.meta_info.htile_clear_mask = 0;
+        const bool depth_color_reinterpret =
+            cache_image.info.props.is_depth != new_image.info.props.is_depth;
+        if (depth_color_reinterpret) {
+            const auto old_htile = cache_image.info.meta_info.htile_addr;
+            const auto new_htile = new_image.info.meta_info.htile_addr;
+            const auto* old_meta = old_htile != 0 ? FindMetaData(old_htile) : nullptr;
+            const auto* new_meta = new_htile != 0 ? FindMetaData(new_htile) : nullptr;
+            VideoCore::Diag::ReportOnce(
+                fmt::format("depth_color_recreate_meta:{:#x}:{}",
+                            new_image.info.guest_address, new_image_id.index),
+                fmt::format("Depth/color overlap recreate metadata state: addr={:#x} "
+                            "old_id={} new_id={} old_depth={} new_depth={} old_format={} "
+                            "new_format={} old_htile={:#x} new_htile={:#x} old_clear_mask={:#x} "
+                            "new_clear_mask={:#x} old_meta_owner={} old_meta_mask={:#x} "
+                            "new_meta_owner={} new_meta_mask={:#x}",
+                            new_image.info.guest_address, cache_image_id.index, new_image_id.index,
+                            static_cast<bool>(cache_image.info.props.is_depth),
+                            static_cast<bool>(new_image.info.props.is_depth),
+                            vk::to_string(cache_image.info.pixel_format),
+                            vk::to_string(new_image.info.pixel_format), old_htile, new_htile,
+                            cache_image.info.meta_info.htile_clear_mask,
+                            new_image.info.meta_info.htile_clear_mask,
+                            old_meta != nullptr ? old_meta->owner_image_id.index : 0,
+                            old_meta != nullptr ? old_meta->clear_mask : -1,
+                            new_meta != nullptr ? new_meta->owner_image_id.index : 0,
+                            new_meta != nullptr ? new_meta->clear_mask : -1));
+            if (new_meta != nullptr && new_meta->owner_image_id != cache_image_id &&
+                new_meta->owner_image_id != new_image_id) {
+                LOG_WARNING(Render_Vulkan,
+                            "Depth/color overlap recreate found stale HTile owner: addr={:#x} "
+                            "htile={:#x} owner={} old_id={} new_id={}",
+                            new_image.info.guest_address, new_htile,
+                            new_meta->owner_image_id.index, cache_image_id.index,
+                            new_image_id.index);
+            }
+        }
 
         if (cache_image.info.num_samples == 1 && new_info.num_samples == 1) {
             // Perform depth<->color copy using the intermediate copy buffer.
