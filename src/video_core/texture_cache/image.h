@@ -55,7 +55,8 @@ struct UniqueImage {
         : device{std::exchange(other.device, vk::Device{})},
           allocator{std::exchange(other.allocator, VK_NULL_HANDLE)},
           allocation{std::exchange(other.allocation, VK_NULL_HANDLE)},
-          image{std::exchange(other.image, VK_NULL_HANDLE)}, image_ci{std::move(other.image_ci)} {}
+          image{std::exchange(other.image, VK_NULL_HANDLE)}, image_ci{std::move(other.image_ci)},
+          poolable{std::exchange(other.poolable, true)} {}
     UniqueImage& operator=(UniqueImage&& other) {
         if (this == &other) {
             return *this;
@@ -66,6 +67,7 @@ struct UniqueImage {
         allocator = std::exchange(other.allocator, VK_NULL_HANDLE);
         allocation = std::exchange(other.allocation, VK_NULL_HANDLE);
         image_ci = std::move(other.image_ci);
+        poolable = std::exchange(other.poolable, true);
         return *this;
     }
 
@@ -87,6 +89,7 @@ public:
     VmaAllocation allocation{};
     vk::Image image{};
     vk::ImageCreateInfo image_ci{};
+    bool poolable = true;
 };
 
 constexpr Common::SlotId NULL_IMAGE_ID{0};

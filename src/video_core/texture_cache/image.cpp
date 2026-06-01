@@ -339,15 +339,23 @@ void DrainImageReusePool(VmaAllocator allocator) {
 
 UniqueImage::~UniqueImage() {
     if (image) {
-        ImageReusePool::Get().Release(allocator, MakeImagePoolKey(image_ci), image, allocation,
-                                      ApproxImageBytes(image_ci));
+        if (poolable) {
+            ImageReusePool::Get().Release(allocator, MakeImagePoolKey(image_ci), image, allocation,
+                                          ApproxImageBytes(image_ci));
+        } else {
+            vmaDestroyImage(allocator, image, allocation);
+        }
     }
 }
 
 void UniqueImage::Destroy() {
     if (image) {
-        ImageReusePool::Get().Release(allocator, MakeImagePoolKey(image_ci), image, allocation,
-                                      ApproxImageBytes(image_ci));
+        if (poolable) {
+            ImageReusePool::Get().Release(allocator, MakeImagePoolKey(image_ci), image, allocation,
+                                          ApproxImageBytes(image_ci));
+        } else {
+            vmaDestroyImage(allocator, image, allocation);
+        }
         image = vk::Image{};
         allocation = {};
     }
@@ -469,6 +477,7 @@ Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
     backing = &backing_images.emplace_back();
     backing->num_samples = info.num_samples;
     backing->image = UniqueImage{instance->GetDevice(), instance->GetAllocator()};
+    backing->image.poolable = !info.props.is_videoout;
     const bool reused_from_pool = backing->image.Create(image_ci);
     if (reused_from_pool) {
         RecordGpuCommandDiagnostic(

@@ -33,6 +33,7 @@ struct ImageProperties {
     u32 is_block : 1;
     u32 is_depth : 1;
     u32 has_stencil : 1;
+    u32 is_videoout : 1;
 };
 
 struct ImageInfo {

@@ -52,6 +52,7 @@ static vk::Format ConvertPixelFormat(const VideoOutFormat format) {
 ImageInfo::ImageInfo(const Libraries::VideoOut::BufferAttributeGroup& group,
                      VAddr cpu_address) noexcept {
     const auto& attrib = group.attrib;
+    props.is_videoout = true;
     props.is_tiled = attrib.tiling_mode == TilingMode::Tile;
     tile_mode =
         props.is_tiled ? AmdGpu::TileMode::Display2DThin : AmdGpu::TileMode::DisplayLinearAligned;
