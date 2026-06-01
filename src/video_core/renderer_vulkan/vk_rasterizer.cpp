@@ -119,6 +119,8 @@ static bool IsComputeImageClearHleDisabled() {
     return disabled;
 }
 
+static void ValidateColorRenderTargetDesc(s32 cb, const VideoCore::TextureCache::ImageDesc& desc);
+
 static const char* MetaTypeName(VideoCore::TextureCache::MetaDataInfo::Type type) {
     switch (type) {
     case VideoCore::TextureCache::MetaDataInfo::Type::CMask:
@@ -308,6 +310,7 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
         }
         const auto& hint = liverpool->last_cb_extent[cb];
         std::construct_at(&desc, col_buf, hint);
+        ValidateColorRenderTargetDesc(cb, desc);
         image_id = bound_images.emplace_back(texture_cache.FindImage(desc));
         auto& image = texture_cache.GetImage(image_id);
         image.binding.is_target = 1u;
@@ -377,6 +380,29 @@ static bool HasValidRenderAttachment(const RenderState& state) {
         }
     }
     return state.depth_stencil_attachment.has_depth || state.depth_stencil_attachment.has_stencil;
+}
+
+static void ValidateColorRenderTargetDesc(s32 cb, const VideoCore::TextureCache::ImageDesc& desc) {
+    const auto& info = desc.info;
+    const auto& view = desc.view_info;
+    const bool invalid = info.guest_address == 0 || info.guest_size == 0 ||
+                         info.pixel_format == vk::Format::eUndefined || info.size.width == 0 ||
+                         info.size.height == 0 || info.pitch == 0 ||
+                         info.resources.layers == 0 || view.range.extent.layers == 0 ||
+                         view.range.base.layer + view.range.extent.layers > info.resources.layers;
+    if (!invalid) {
+        return;
+    }
+
+    VideoCore::Diag::ReportOnce(
+        fmt::format("rt_desc_invalid:{}:{:#x}", cb, info.guest_address),
+        fmt::format("[PrepareRenderState] cb{} invalid color RT desc: addr={:#x} "
+                    "guest_size={} format={} extent={}x{} pitch={} image_layers={} "
+                    "view_base_layer={} view_layers={} tile_mode={} array_mode={}",
+                    cb, info.guest_address, info.guest_size, vk::to_string(info.pixel_format),
+                    info.size.width, info.size.height, info.pitch, info.resources.layers,
+                    view.range.base.layer, view.range.extent.layers,
+                    static_cast<u32>(info.tile_mode), static_cast<u32>(info.array_mode)));
 }
 
 void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
