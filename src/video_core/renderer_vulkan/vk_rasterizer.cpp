@@ -550,6 +550,8 @@ void Rasterizer::DispatchDirect() {
                                cs_program.dim_z);
     VideoCore::Diag::CheckDispatch("Rasterizer.Compute", cs_program.dim_x, cs_program.dim_y,
                                    cs_program.dim_z);
+    VideoCore::Diag::CheckWorkgroupSize("Rasterizer.Compute", cs_program.num_thread_x.full,
+                                        cs_program.num_thread_y.full, cs_program.num_thread_z.full);
     cmdbuf.dispatch(cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
     ForceVideoOutStorageColorIfRequested(cmdbuf, cs, cs_program.dim_x, cs_program.dim_y,
                                          cs_program.dim_z);

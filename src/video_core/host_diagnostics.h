@@ -312,6 +312,21 @@ inline bool CheckBufferRange(const char* site, u64 buffer_size, u64 offset, u64 
     return bad;
 }
 
+// Validate a compute local workgroup size (threads per group) against the device invocation cap.
+// Default 1024 = MoltenVK/Apple maxComputeWorkGroupInvocations (also the Vulkan minimum).
+inline bool CheckWorkgroupSize(const char* site, u32 lx, u32 ly, u32 lz,
+                               u32 max_invocations = 1024) {
+    const u64 total = static_cast<u64>(lx) * ly * lz;
+    if (total == 0 || total > max_invocations) {
+        ReportOnce(fmt::format("wgsize:{}", site),
+                   fmt::format("[{}] compute local workgroup size {}x{}x{} = {} invocations "
+                               "(device max {})",
+                               site, lx, ly, lz, total, max_invocations));
+        return true;
+    }
+    return false;
+}
+
 // Sanity-check a compute dispatch. A zero dimension wastes a submit; an absurdly large one can hang
 // the GPU. NOTE: the default ceiling is intentionally far above Vulkan's guaranteed-minimum 65535:
 // MoltenVK on Apple GPUs reports maxComputeWorkGroupCount ~1.07e9 per dim, so large detile
