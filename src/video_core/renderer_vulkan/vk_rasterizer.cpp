@@ -1926,15 +1926,46 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         attachment.image_layout = image.backing->state.layout;
         attachment.clear_value = {};
 
-        if (regs.depth_buffer.DepthValid()) {
+        const bool depth_attached =
+            regs.depth_control.depth_enable && regs.depth_buffer.DepthValid();
+        const bool stencil_attached =
+            regs.depth_control.stencil_enable && regs.depth_buffer.StencilValid();
+        const bool image_has_depth =
+            static_cast<bool>(image.aspect_mask & vk::ImageAspectFlagBits::eDepth);
+        const bool image_has_stencil =
+            static_cast<bool>(image.aspect_mask & vk::ImageAspectFlagBits::eStencil);
+
+        if (depth_attached) {
             attachment.clear_value[0] = is_depth_clear ? std::bit_cast<u32>(regs.depth_clear) : 0u;
             attachment.has_depth = true;
             attachment.depth_clear = is_depth_clear;
         }
-        if (regs.depth_buffer.StencilValid()) {
+        if (stencil_attached) {
             attachment.clear_value[1] = is_stencil_clear ? regs.stencil_clear : 0u;
             attachment.has_stencil = true;
             attachment.stencil_clear = is_stencil_clear;
+        }
+        if (attachment.has_depth && !image_has_depth) {
+            VideoCore::Diag::ReportOnce(
+                fmt::format("depth_attachment_missing_depth_aspect:{}", image_id.index),
+                fmt::format("[BeginRendering] depth attachment requested but bound image has no "
+                            "depth aspect: image_id={} image={} aspect={} depth_addr={:#x} "
+                            "stencil_addr={:#x} depth_enable={} stencil_enable={}",
+                            image_id.index, vk::to_string(image.info.pixel_format),
+                            vk::to_string(image.aspect_mask), regs.depth_buffer.DepthAddress(),
+                            regs.depth_buffer.StencilAddress(), regs.depth_control.depth_enable,
+                            regs.depth_control.stencil_enable));
+        }
+        if (attachment.has_stencil && !image_has_stencil) {
+            VideoCore::Diag::ReportOnce(
+                fmt::format("stencil_attachment_missing_stencil_aspect:{}", image_id.index),
+                fmt::format("[BeginRendering] stencil attachment requested but bound image has no "
+                            "stencil aspect: image_id={} image={} aspect={} depth_addr={:#x} "
+                            "stencil_addr={:#x} depth_enable={} stencil_enable={}",
+                            image_id.index, vk::to_string(image.info.pixel_format),
+                            vk::to_string(image.aspect_mask), regs.depth_buffer.DepthAddress(),
+                            regs.depth_buffer.StencilAddress(), regs.depth_control.depth_enable,
+                            regs.depth_control.stencil_enable));
         }
         const vk::Format depth_view_format = instance.GetSupportedFormat(
             image_view.info.format, vk::FormatFeatureFlagBits2::eDepthStencilAttachment);
@@ -1990,6 +2021,37 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         image.usage.depth_target = true;
     } else {
         state.depth_stencil_attachment = {};
+    }
+
+    const bool pipeline_has_depth =
+        pipeline->GetDepthAttachmentFormat() != vk::Format::eUndefined;
+    const bool pipeline_has_stencil =
+        pipeline->GetStencilAttachmentFormat() != vk::Format::eUndefined;
+    if (pipeline_has_depth != state.depth_stencil_attachment.has_depth) {
+        VideoCore::Diag::ReportOnce(
+            fmt::format("pipeline_depth_attachment_presence:{}:{}",
+                        static_cast<u32>(pipeline_has_depth),
+                        static_cast<u32>(state.depth_stencil_attachment.has_depth)),
+            fmt::format("[BeginRendering] pipeline depth attachment presence mismatch: "
+                        "pipeline_depth_format={} bound_depth={} db_image_bound={} depth_valid={} "
+                        "depth_enable={} depth_write={} mrt_mask={:#x}",
+                        vk::to_string(pipeline->GetDepthAttachmentFormat()),
+                        state.depth_stencil_attachment.has_depth, static_cast<bool>(db_desc.first),
+                        regs.depth_buffer.DepthValid(), regs.depth_control.depth_enable,
+                        regs.depth_control.depth_write_enable, key.mrt_mask));
+    }
+    if (pipeline_has_stencil != state.depth_stencil_attachment.has_stencil) {
+        VideoCore::Diag::ReportOnce(
+            fmt::format("pipeline_stencil_attachment_presence:{}:{}",
+                        static_cast<u32>(pipeline_has_stencil),
+                        static_cast<u32>(state.depth_stencil_attachment.has_stencil)),
+            fmt::format("[BeginRendering] pipeline stencil attachment presence mismatch: "
+                        "pipeline_stencil_format={} bound_stencil={} db_image_bound={} "
+                        "stencil_valid={} stencil_enable={} mrt_mask={:#x}",
+                        vk::to_string(pipeline->GetStencilAttachmentFormat()),
+                        state.depth_stencil_attachment.has_stencil,
+                        static_cast<bool>(db_desc.first), regs.depth_buffer.StencilValid(),
+                        regs.depth_control.stencil_enable, key.mrt_mask));
     }
 
     if (state.num_layers == std::numeric_limits<u16>::max()) {
