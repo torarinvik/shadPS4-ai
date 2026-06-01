@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <limits>
+#include "video_core/host_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/renderer_vulkan/vk_wait_diagnostics.h"
@@ -41,6 +42,18 @@ void MasterSemaphore::Refresh() {
         }
     } while (!gpu_tick.compare_exchange_weak(this_tick, counter, std::memory_order_release,
                                              std::memory_order_relaxed));
+
+    // Invariant (#10): the GPU can only complete ticks that were actually handed out, so the known
+    // GPU tick must never exceed the logical current tick. A violation means timeline-semaphore
+    // accounting corruption (or a stray signal), which precedes a device loss - surface it.
+    const u64 logical = current_tick.load(std::memory_order_acquire);
+    if (counter > logical) {
+        VideoCore::Diag::ReportOnce(
+            "mastersem:gpu_ahead",
+            fmt::format("[MasterSemaphore] known GPU tick {} exceeds logical current_tick {} "
+                        "(timeline accounting corruption)",
+                        counter, logical));
+    }
 }
 
 void MasterSemaphore::Wait(u64 tick) {

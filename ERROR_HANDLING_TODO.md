@@ -20,7 +20,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 7. [ ] SlotVector double-free guard: each slot id erased exactly once; add a generation counter validated at submit.
 8. [x] Frees recorded into the GPU-op ring with their registration tick (DeleteImage/DeleteBuffer), dumped on device loss; the device-loss failure path now logs target_tick/known_gpu_tick/current_tick to compare against FREE reg_tick entries.
 9. [ ] Assert DeleteImage/DeleteBuffer resource is Unregistered before the deferred destroy is queued.
-10. [ ] MasterSemaphore invariants: CurrentTick >= KnownGpuTick; NextTick never returns <= KnownGpuTick.
+10. [~] MasterSemaphore invariant: known GPU tick never exceeds logical current_tick (warn in Refresh). (todo: NextTick never returns <= KnownGpuTick - hot inline path, deferred.)
 11. [ ] In PopPendingOperations, assert a fired op's gpu_tick < current submitted tick.
 12. [ ] Assert detile scratch isn't freed before the consuming image.Upload is submitted.
 13. [ ] StreamBuffer ring: warn when an allocation wraps onto an offset still referenced by an in-flight tick.
