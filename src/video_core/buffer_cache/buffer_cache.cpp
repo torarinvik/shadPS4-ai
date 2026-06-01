@@ -279,6 +279,8 @@ void BufferCache::BindIndexBuffer(u32 index_offset) {
     // Bind index buffer.
     const u32 index_buffer_size = regs.num_indices * index_size;
     const auto [vk_buffer, offset] = ObtainBuffer(index_address, index_buffer_size, false);
+    VideoCore::Diag::CheckBufferRange("BindIndexBuffer", vk_buffer->SizeBytes(), offset,
+                                      index_buffer_size);
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindIndexBuffer(vk_buffer->Handle(), offset, index_type);
 }

@@ -44,7 +44,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 ## TIER 1 — Dispatch & draw parameter sanity
 28. [~] Plumb the real device maxComputeWorkGroupCount into CheckDispatch (raised ceiling to 1<<28; still want the true per-device limit).
 29. [x] Validate compute local workgroup size (num_thread x*y*z) <= maxComputeWorkGroupInvocations (1024) via CheckWorkgroupSize at the dispatch site.
-30. [ ] Index buffer bounds: firstIndex+indexCount * stride <= index buffer size.
+30. [x] Index buffer bounds: bound range (offset + num_indices*index_size) <= backing buffer size at BindIndexBuffer.
 31. [ ] Vertex/instance counts non-absurd; vertex offset within buffer.
 32. [ ] Indirect draw/dispatch: indirect buffer offset+stride in bounds.
 33. [ ] Viewport/scissor non-negative, within framebuffer; render area <= min attachment extent.
