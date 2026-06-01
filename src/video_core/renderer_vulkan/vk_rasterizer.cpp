@@ -391,6 +391,32 @@ void Rasterizer::DumpRenderTargetSetOnSkippedDraw(const GraphicsPipeline* pipeli
     LOG_WARNING(Render_Vulkan, "{}", message);
 }
 
+void Rasterizer::RecordDrawAttachmentOutcome(bool issued) {
+    const u64 tick = scheduler.CurrentTick();
+    if (draw_ratio_tick == 0) {
+        draw_ratio_tick = tick;
+    }
+    if (draw_ratio_tick != tick) {
+        const u32 total = issued_draws_this_tick + skipped_draws_this_tick;
+        if (total >= 16 && skipped_draws_this_tick * 4 >= total * 3) {
+            LOG_WARNING(Render_Vulkan,
+                        "[Draw] high skipped-draw ratio: tick={} skipped={} issued={} total={} "
+                        "ratio={}%",
+                        draw_ratio_tick, skipped_draws_this_tick, issued_draws_this_tick, total,
+                        (skipped_draws_this_tick * 100) / total);
+        }
+        draw_ratio_tick = tick;
+        issued_draws_this_tick = 0;
+        skipped_draws_this_tick = 0;
+    }
+
+    if (issued) {
+        ++issued_draws_this_tick;
+    } else {
+        ++skipped_draws_this_tick;
+    }
+}
+
 static std::pair<u32, u32> GetDrawOffsets(
     const AmdGpu::Regs& regs, const Shader::Info& info,
     const std::optional<Shader::Gcn::FetchShaderData>& fetch_shader) {
@@ -487,6 +513,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     const auto state = BeginRendering(pipeline);
     if (!HasValidRenderAttachment(state)) {
         DumpRenderTargetSetOnSkippedDraw(pipeline, state);
+        RecordDrawAttachmentOutcome(false);
         u32 null_color = 0;
         for (u32 cb = 0; cb < state.num_color_attachments; ++cb) {
             if (!state.color_attachments[cb].image_view) {
@@ -513,6 +540,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     pipeline->BindResources(set_writes, buffer_barriers, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
+    RecordDrawAttachmentOutcome(true);
 
     const auto& vs_info = pipeline->GetStage(Shader::LogicalStage::Vertex);
     const auto& fetch_shader = pipeline->GetFetchShader();
@@ -561,6 +589,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     const auto state = BeginRendering(pipeline);
     if (!HasValidRenderAttachment(state)) {
         DumpRenderTargetSetOnSkippedDraw(pipeline, state);
+        RecordDrawAttachmentOutcome(false);
         LOG_WARNING(Render_Vulkan, "Skipping indirect draw with no valid render attachments");
         return;
     }
@@ -587,6 +616,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     pipeline->BindResources(set_writes, buffer_barriers, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
+    RecordDrawAttachmentOutcome(true);
 
     // We can safely ignore both SGPR UD indices and results of fetch shader parsing, as vertex and
     // instance offsets will be automatically applied by Vulkan from indirect args buffer.
