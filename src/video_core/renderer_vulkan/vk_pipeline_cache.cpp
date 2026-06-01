@@ -468,6 +468,19 @@ bool PipelineCache::RefreshGraphicsKey() {
         return false;
     }
 
+    if (skip_cb_binding) {
+        key.mrt_mask = 0;
+    } else {
+        for (s32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS; ++cb) {
+            const auto& col_buf = regs.color_buffers[cb];
+            if (!col_buf || !regs.color_target_mask.GetMask(cb)) {
+                key.mrt_mask &= ~(1u << cb);
+                std::memset(&key.color_buffers[cb], 0, sizeof(Shader::PsColorBuffer));
+            }
+        }
+    }
+    key.num_color_attachments = std::bit_width(key.mrt_mask);
+
     // Second pass to mask out render targets not written by shader and fill remaining info
     u8 color_samples = 0;
     bool all_color_samples_same = true;

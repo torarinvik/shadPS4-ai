@@ -313,6 +313,7 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
                                 target_mask, addr));
             }
             image_id = {};
+            desc = {};
             continue;
         }
         const auto& hint = liverpool->last_cb_extent[cb];
