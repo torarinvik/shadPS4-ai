@@ -5,6 +5,7 @@
 
 #include "common/assert.h"
 #include "common/debug.h"
+#include "common/trace_control.h"
 #include "common/thread.h"
 #include "core/debug_state.h"
 #include "core/emulator_settings.h"
@@ -56,6 +57,19 @@ constexpr u32 PixelFormatBpp(PixelFormat pixel_format) {
     }
 }
 
+static u32 GetBootWatchdogSeconds() {
+    static const u32 seconds = [] {
+        const char* value = std::getenv("SHADPS4_BOOT_WATCHDOG_SECONDS");
+        if (value == nullptr || value[0] == '\0') {
+            return 10u;
+        }
+        char* end{};
+        const unsigned long parsed = std::strtoul(value, &end, 10);
+        return end != value ? static_cast<u32>(std::min<unsigned long>(parsed, 300)) : 10u;
+    }();
+    return seconds;
+}
+
 static int ValidateBufferAttribute(const BufferAttribute* attribute) {
     if (!IsSupportedPixelFormat(attribute->pixel_format)) {
         return ORBIS_VIDEO_OUT_ERROR_INVALID_PIXEL_FORMAT;
@@ -90,6 +104,9 @@ int VideoOutDriver::Open(const ServiceThreadParams* params) {
         return ORBIS_VIDEO_OUT_ERROR_RESOURCE_BUSY;
     }
     main_port.is_open = true;
+    main_port.saw_nonblank_flip = false;
+    main_port.boot_watchdog_reported = false;
+    main_port.open_time = std::chrono::steady_clock::now();
     liverpool->SetVoPort(&main_port);
     return 1;
 }
@@ -109,6 +126,9 @@ void VideoOutDriver::Close(s32 handle) {
     main_port.is_open = false;
     main_port.flip_rate = 0;
     main_port.prev_index = -1;
+    main_port.saw_nonblank_flip = false;
+    main_port.boot_watchdog_reported = false;
+    main_port.open_time = {};
 
     // Clear port information
     std::memset(main_port.buffer_labels.data(), 0, sizeof(main_port.buffer_labels));
@@ -390,6 +410,35 @@ void VideoOutDriver::DrawLastFrame() {
     }
 }
 
+void VideoOutDriver::CheckBootWatchdog() {
+    const u32 threshold_seconds = GetBootWatchdogSeconds();
+    if (threshold_seconds == 0 || !main_port.is_open || main_port.saw_nonblank_flip ||
+        main_port.boot_watchdog_reported || main_port.open_time == decltype(main_port.open_time){}) {
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - main_port.open_time);
+    if (elapsed.count() < threshold_seconds) {
+        return;
+    }
+
+    std::scoped_lock queue_lock{mutex};
+    std::scoped_lock port_lock{main_port.port_mutex};
+    main_port.boot_watchdog_reported = true;
+    LOG_WARNING(
+        Lib_VideoOut,
+        "BOOT_WATCHDOG stalled_after_videoout_open elapsed_s={} threshold_s={} "
+        "registered_buffers={} queued_flips={} flip_pending={} gc_queue={} prev_index={} "
+        "flip_rate={} vblank_count={} submit_tsc={} aggressive_logging={} "
+        "black_watchdog_armed={}",
+        elapsed.count(), threshold_seconds, main_port.NumRegisteredBuffers(), requests.size(),
+        main_port.flip_status.flip_pending_num, main_port.flip_status.gc_queue_num,
+        main_port.prev_index, main_port.flip_rate, main_port.vblank_status.count,
+        main_port.flip_status.submit_tsc, Common::Trace::IsAggressiveLoggingEnabled(),
+        Common::Trace::IsBlackScreenWatchdogArmed());
+}
+
 bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
                                 bool is_eop /*= false*/) {
     {
@@ -439,6 +488,9 @@ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_
     }
 
     std::scoped_lock lock{mutex};
+    if (index != -1) {
+        port->saw_nonblank_flip = true;
+    }
     requests.push({
         .frame = frame,
         .port = port,
@@ -469,6 +521,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
 
     while (!token.stop_requested()) {
         timer.Start();
+        CheckBootWatchdog();
 
         if (DebugState.IsGuestThreadsPaused()) {
             DrawLastFrame();

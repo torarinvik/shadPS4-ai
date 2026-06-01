@@ -56,7 +56,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 30. [x] Verify reused image's full create-info matches request byte-exactly (rule out a key field omission).
 
 ## TIER 1 — Intermittent black-on-boot / no-audio
-31. [ ] Early-boot watchdog: N s after `sceVideoOutOpen` with no non-blank flip → structured "boot stalled" dump.
+31. [x] Early-boot watchdog: N s after `sceVideoOutOpen` with no non-blank flip → structured "boot stalled" dump.
 32. [ ] Cheap luminance/variance probe per presented frame; log blank vs drawn.
 33. [ ] Warn if audio init (`sceAudioOutOpen`/Ngs2) doesn't occur within the boot window.
 34. [ ] Catch early non-GPU-thread aborts (Ajm/AvPlayer/MoviePlayer2) with thread+context, not bare terminate.

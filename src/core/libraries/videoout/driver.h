@@ -7,6 +7,7 @@
 #include "common/polyfill_thread.h"
 #include "core/libraries/videoout/video_out.h"
 
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <queue>
@@ -35,6 +36,9 @@ struct VideoOutPort {
     int prev_index = -1;
     bool is_open = false;
     bool is_hdr = false;
+    bool saw_nonblank_flip = false;
+    bool boot_watchdog_reported = false;
+    std::chrono::steady_clock::time_point open_time{};
 
     s32 FindFreeGroup() const {
         s32 index = 0;
@@ -127,6 +131,7 @@ private:
     void Flip(const Request& req);
     void DrawBlankFrame(); // Video port out not open
     void DrawLastFrame();  // Used when there is no flip request
+    void CheckBootWatchdog();
     void SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop = false);
     void PresentThread(std::stop_token token);
 
