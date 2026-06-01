@@ -14,6 +14,7 @@
 
 #include "common/logging/log.h"
 #include "common/types.h"
+#include "video_core/host_diagnostics.h"
 
 namespace Vulkan {
 
@@ -25,7 +26,14 @@ struct GpuCommandDiagnosticEntry {
 inline bool IsGpuCommandDiagnosticsEnabled() {
     static const bool enabled = [] {
         const char* value = std::getenv("SHADPS4_TRACE_GPU_COMMANDS");
-        return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+        if (value != nullptr) {
+            // Explicit override (set/clear) takes precedence over the validation-mode default.
+            return value[0] != '\0' && std::strcmp(value, "0") != 0;
+        }
+        // Otherwise record the ring whenever GPU validation is active (warn is the default), so a
+        // device-loss dump is populated without needing a separate env. SHADPS4_GPU_VALIDATION=off
+        // disables both validation and this ring.
+        return VideoCore::Diag::ValidationMode() != VideoCore::Diag::Mode::Off;
     }();
     return enabled;
 }

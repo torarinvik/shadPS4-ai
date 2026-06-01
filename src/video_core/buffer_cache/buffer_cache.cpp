@@ -13,6 +13,7 @@
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/host_diagnostics.h"
 #include "video_core/buffer_cache/memory_tracker.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -1017,10 +1018,16 @@ void BufferCache::DeleteBuffer(BufferId buffer_id) {
     // device loss observed in UFC 3 / Madden NFL 24).
     const VAddr trace_addr = buffer.CpuAddr();
     const u64 trace_size = buffer.SizeBytes();
-    scheduler.DeferOperationAfterSubmit([this, buffer_id, trace_addr, trace_size] {
+    const u64 reg_tick = scheduler.CurrentTick();
+    scheduler.DeferOperationAfterSubmit([this, buffer_id, trace_addr, trace_size, reg_tick] {
         if (VideoCore::Diag::TraceFrees()) {
             LOG_INFO(Render_Vulkan, "FREE buffer addr={:#x} size={}", trace_addr, trace_size);
         }
+        Vulkan::RecordGpuCommandDiagnostic(
+            "FREE buffer addr=0x%llx size=%llu reg_tick=%llu",
+            static_cast<unsigned long long>(trace_addr),
+            static_cast<unsigned long long>(trace_size),
+            static_cast<unsigned long long>(reg_tick));
         slot_buffers.erase(buffer_id);
     });
     buffer.is_deleted = true;

@@ -20,6 +20,7 @@
 #include "video_core/host_diagnostics.h"
 #include "video_core/page_manager.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/host_compatibility.h"
@@ -1557,10 +1558,16 @@ void TextureCache::DeleteImage(ImageId image_id) {
     // recording is submitted+completed -> kIOGPU Invalid Resource device loss (UFC 3 menu/movie).
     const VAddr trace_addr = image.info.guest_address;
     const u64 trace_size = image.info.guest_size;
-    scheduler.DeferOperationAfterSubmit([this, image_id, trace_addr, trace_size] {
+    const u64 reg_tick = scheduler.CurrentTick();
+    scheduler.DeferOperationAfterSubmit([this, image_id, trace_addr, trace_size, reg_tick] {
         if (VideoCore::Diag::TraceFrees()) {
             LOG_INFO(Render_Vulkan, "FREE image addr={:#x} size={}", trace_addr, trace_size);
         }
+        Vulkan::RecordGpuCommandDiagnostic(
+            "FREE image addr=0x%llx size=%llu reg_tick=%llu",
+            static_cast<unsigned long long>(trace_addr),
+            static_cast<unsigned long long>(trace_size),
+            static_cast<unsigned long long>(reg_tick));
         Image& image = slot_images[image_id];
         for (auto& backing : image.backing_images) {
             for (const ImageViewId image_view_id : backing.image_view_ids) {
