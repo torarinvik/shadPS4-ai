@@ -905,6 +905,13 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
             push_data.AddOffset(binding.buffer, adjust);
             VideoCore::Diag::CheckBufferRange(is_storage ? "BindSSBO" : "BindUBO",
                                               vk_buffer->SizeBytes(), offset_aligned, size + adjust);
+            if (vk_buffer->is_deleted) {
+                VideoCore::Diag::ReportOnce(
+                    "binddesc:deleted_buffer",
+                    fmt::format("[BindBuffer] descriptor binds a buffer queued for deferred "
+                                "destroy: addr={:#x} storage={}",
+                                vk_buffer->CpuAddr(), is_storage));
+            }
             buffer_infos.emplace_back(vk_buffer->Handle(), offset_aligned, size + adjust);
             if (auto barrier =
                     vk_buffer->GetBarrier(desc.is_written ? vk::AccessFlagBits2::eShaderWrite
@@ -1232,6 +1239,14 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
                     "bindtex:nullview",
                     fmt::format("[BindTextures] bound image view handle is null: addr={:#x} "
                                 "storage={} stage={}",
+                                image.info.guest_address, is_storage,
+                                static_cast<u32>(stage.stage)));
+            }
+            if (False(image.flags & VideoCore::ImageFlagBits::Registered)) {
+                VideoCore::Diag::ReportOnce(
+                    "bindtex:unregistered",
+                    fmt::format("[BindTextures] bound image view's parent image is "
+                                "unregistered/pending-destroy: addr={:#x} storage={} stage={}",
                                 image.info.guest_address, is_storage,
                                 static_cast<u32>(stage.stage)));
             }

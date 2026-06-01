@@ -460,6 +460,9 @@ public:
         PendingOp op{std::move(func), CurrentTick()};
         CaptureSiblingWaits(op);
         pending_ops.emplace(std::move(op));
+        if (pending_ops.size() > kDeferredQueueWarnThreshold) {
+            WarnDeferredQueueDepth(pending_ops.size());
+        }
     }
 
     /// Defers an operation until the gpu has passed the tick AFTER the current one.
@@ -474,6 +477,9 @@ public:
         PendingOp op{std::move(func), CurrentTick() + 1};
         CaptureSiblingWaits(op);
         pending_ops.emplace(std::move(op));
+        if (pending_ops.size() > kDeferredQueueWarnThreshold) {
+            WarnDeferredQueueDepth(pending_ops.size());
+        }
     }
 
     /// Defers an operation until the gpu has reached the current cpu tick.
@@ -516,6 +522,12 @@ private:
             ++op.num_sibling_waits;
         }
     }
+
+    /// Warn (rate-limited, defined in the .cpp to keep diagnostics deps out of this hot header)
+    /// when the deferred-destroy queue grows abnormally deep - signals free-churn or a stalled GPU
+    /// not draining pending destroys (we have seen 255-free bursts during ResolveDepthOverlap).
+    static constexpr std::size_t kDeferredQueueWarnThreshold = 1024;
+    void WarnDeferredQueueDepth(std::size_t depth) const;
 
     /// Returns true once every sibling has GPU-completed its snapshot tick.
     bool SiblingWaitsSatisfied(PendingOp& op) {

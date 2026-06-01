@@ -14,7 +14,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 1. [ ] Tag every buffer/image with a per-scheduler "last-bound tick" when bound into a cmdbuf; on destroy assert it is GPU-complete on ALL schedulers. (Would name the current intermittent race.)
 2. [ ] Single chokepoint around vmaDestroyBuffer/vmaDestroyImage; under a flag, validate no in-flight cmdbuf references it before freeing.
 3. [ ] Freed-handle poison list kept N frames; assert on bind that a handle isn't poisoned (bind-after-free).
-4. [ ] Per-scheduler live deferred-destroy queue-depth gauge; warn past a threshold (free-churn/leak; we saw 255 frees/burst).
+4. [x] Per-scheduler deferred-destroy queue-depth gauge; warns (rate-limited) when pending_ops exceeds 1024 (free-churn/stalled-drain). WarnDeferredQueueDepth, kept out of the hot header.
 5. [ ] Count per-frame image recreates per guest address in ResolveDepthOverlap/ExpandImage; warn when one address recreates >K/frame (churn driver).
 6. [ ] Warn on monotonically growing recreate sizes at one address (the ratchet: 8->10->12 MB at 0x279620000).
 7. [ ] SlotVector double-free guard: each slot id erased exactly once; add a generation counter validated at submit.
@@ -24,7 +24,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 11. [ ] In PopPendingOperations, assert a fired op's gpu_tick < current submitted tick.
 12. [ ] Assert detile scratch isn't freed before the consuming image.Upload is submitted.
 13. [ ] StreamBuffer ring: warn when an allocation wraps onto an offset still referenced by an in-flight tick.
-14. [ ] Assert a bound ImageView's parent image isn't pending-destroy.
+14. [x] Warn when a bound ImageView's parent image lacks the Registered flag (unregistered/pending-destroy) at BindTextures.
 15. [ ] Validate the 3 schedulers each registered exactly 2 siblings at first submit.
 
 ## TIER 1 — GPU copy / transfer bounds
@@ -61,7 +61,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 42. [ ] Detect a depth image bound as a storage image (Metal forbids) - warn/skip.
 43. [ ] Descriptor counts <= pool/layout limits before pushDescriptorSet.
 44. [ ] Push-constant size <= maxPushConstantsSize and the pipeline's declared range.
-45. [ ] Assert no descriptor binds a resource queued for deferred destroy this frame.
+45. [~] Warn when a descriptor binds a buffer with is_deleted set (BindBuffer); image side covered by #14. (todo: image-view descriptor pending-destroy beyond the Registered flag.)
 46. [ ] Sampler/vertex-buffer bindings reference live resources with consistent stride.
 47. [ ] Validate the shader's declared storage-image format matches the bound image format.
 

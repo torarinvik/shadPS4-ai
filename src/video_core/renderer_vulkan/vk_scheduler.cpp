@@ -5,6 +5,7 @@
 #include "common/debug.h"
 #include "common/thread.h"
 #include "imgui/renderer/texture_manager.h"
+#include "video_core/host_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
@@ -124,6 +125,14 @@ void Scheduler::Wait(u64 tick) {
         Flush(info);
     }
     master_semaphore.Wait(tick);
+}
+
+void Scheduler::WarnDeferredQueueDepth(std::size_t depth) const {
+    VideoCore::Diag::ReportOnce(
+        "scheduler:deferred_queue_depth",
+        fmt::format("[Scheduler] deferred-destroy queue depth {} exceeds {} - free-churn or the GPU "
+                    "is not draining pending destroys",
+                    depth, kDeferredQueueWarnThreshold));
 }
 
 void Scheduler::PopPendingOperations() {
