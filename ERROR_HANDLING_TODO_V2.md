@@ -21,11 +21,11 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 
 ## TIER 0A — Residual device loss B (buffer-side churn / command buffer)
 1. [ ] Apply the reuse-pool idea to BUFFERS: recycle UniqueBuffer (VkBuffer+alloc) by exact create-info, same as images, to kill small-buffer vmaCreate/Destroy churn.
-2. [ ] Count + warn on per-frame buffer create/destroy churn per size-class (16 KB stream/util buffers dominate the ring); gauge whether buffer churn drives the loss.
+2. [x] Count + warn on per-frame buffer create/destroy churn per size-class (16 KB stream/util buffers dominate the ring); gauge whether buffer churn drives the loss.
 3. [ ] Tag each `copy_buffer_sync`/`copy_buffer_download` ring entry with the source subsystem (stream/util/uniform/GDS) so the 474/frame flood is attributable.
 4. [ ] On device loss, log WHICH command buffer index failed + map it to the scheduler (draw/present/flip) and its in-flight tick range.
-5. [ ] Record buffer FREEs in the ring already (done) — also record buffer CREATEs so a create/free pair at the same addr within N ops is flagged (churn signature).
-6. [ ] Validate `BufferCache::SynchronizeBuffer`'s src buffer size (the one copy site still unchecked — src is a raw handle) by threading the size through.
+5. [x] Record buffer FREEs in the ring already (done) — also record buffer CREATEs so a create/free pair at the same addr within N ops is flagged (churn signature).
+6. [x] Validate `BufferCache::SynchronizeBuffer`'s src buffer size (the one copy site still unchecked — src is a raw handle) by threading the size through.
 7. [ ] Warn when the deferred-destroy queue for buffers exceeds a threshold (mirror the image gauge) — buffer free-churn detector.
 8. [ ] Add "ticks since last successful present" + failing-tick to the swapchain-acquire device-loss dump (present path has no tick log yet, unlike master_semaphore).
 9. [ ] Quarantine experiment (env-gated): defer buffer frees an extra K submits; if the loss recedes, it is buffer-free timing; if not, it is elsewhere.
@@ -33,8 +33,8 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 
 ## TIER 0B — Octagon/menu render corruption A (null color render target)
 11. [x] Name which color attachment is null + addr/format at BeginRendering, and which pipeline skips (mrt_mask) — done (`280befc1`); drove the diagnosis.
-12. [ ] Trace WHY `cb_descs[cb].image_id` is null: instrument `PrepareRenderState` / `FindRenderTarget` for `0x280320000`/`0x281140000` to log the lookup path that returns null.
-13. [ ] Warn when `FindImage`/`FindRenderTarget` returns null for a color buffer with a valid address (distinguish "no RT bound" from "RT lookup failed").
+12. [x] Trace WHY `cb_descs[cb].image_id` is null: instrument `PrepareRenderState` / `FindRenderTarget` for `0x280320000`/`0x281140000` to log the lookup path that returns null.
+13. [x] Warn when `FindImage`/`FindRenderTarget` returns null for a color buffer with a valid address (distinguish "no RT bound" from "RT lookup failed").
 14. [ ] Validate the color buffer's ImageInfo (format/extent/tiling) is well-formed before lookup; warn on a degenerate desc that can't resolve.
 15. [ ] Check if the null RT addr was recently freed-to-pool and not re-found (pool interaction with RT lookup) — rule the pool in/out for A.
 16. [ ] Log the full render-target set (all cb formats/ids/layouts + depth) at the first skipped draw of each frame.
@@ -46,7 +46,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 ## TIER 0C — Image reuse pool correctness & safety (new code)
 21. [ ] Env-gated clear/zero of a recycled image on acquire to test stale-content as a cause of A / black-boot.
 22. [ ] Assert a pooled image is GPU-idle on release (owning tick GPU-complete).
-23. [ ] Pool stats (hits/misses/evictions/live bytes) under a flag; warn on pathological miss rate or runaway bytes.
+23. [x] Pool stats (hits/misses/evictions/live bytes) under a flag; warn on pathological miss rate or runaway bytes.
 24. [ ] Never pool external/shared-memory or dedicated VideoOut backings; assert they take the destroy path.
 25. [ ] Per-key entry cap so one churning key can't evict everything useful.
 26. [ ] Drain-on-budget-pressure before failing an allocation.
@@ -90,7 +90,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 
 ## TIER 2 — Image/buffer state, layout & format
 58. [ ] Central Image::ValidateState() (layout != Undefined when sampled/attached, backing non-null) at bind.
-59. [ ] Validate layout transitions legal (source matches tracked actual layout).
+59. [x] Validate layout transitions legal (source matches tracked actual layout).
 60. [ ] Format-substitution guard: host != guest -> usage compatible (D16->D32 class).
 61. [ ] Depth/stencil plane-size correctness for copies (assert at source too).
 62. [ ] Image extent <= maxImageDimension2D/3D at creation.
