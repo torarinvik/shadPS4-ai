@@ -6,6 +6,7 @@
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/host_diagnostics.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -122,6 +123,13 @@ Buffer::Buffer(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
 
     const auto device = instance->GetDevice();
     Vulkan::SetObjectName(device, Handle(), "Buffer {:#x}:{:#x}", cpu_addr, size_bytes);
+
+    // Record buffer creation in the GPU-op ring (mirrors the FREE buffer entry) so a device-loss
+    // dump reveals create/free churn pairs at the same address - the residual UFC 3 loss shows heavy
+    // small-buffer traffic, and we otherwise only recorded frees.
+    Vulkan::RecordGpuCommandDiagnostic("CREATE buffer addr=0x%llx size=%llu",
+                                       static_cast<unsigned long long>(cpu_addr),
+                                       static_cast<unsigned long long>(size_bytes));
 
     // Map it if it is host visible.
     VkMemoryPropertyFlags property_flags{};
