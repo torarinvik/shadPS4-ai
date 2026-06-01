@@ -35,9 +35,31 @@ struct VideoOutRange {
     VideoOutWriteTrace last_write{};
 };
 
+struct FirstSkippedDrawTrace {
+    bool seen{};
+    u64 tick{};
+    u32 mrt_mask{};
+    u32 num_color_attachments{};
+    bool has_depth{};
+    bool has_stencil{};
+    u32 width{};
+    u32 height{};
+};
+
+struct FirstShaderCompileFailureTrace {
+    bool seen{};
+    const char* op{};
+    u32 stage{};
+    u64 code_words{};
+    u64 result{};
+};
+
 inline std::mutex videoout_trace_mutex;
 inline std::array<VideoOutRange, 16> videoout_ranges{};
 inline std::atomic_uint64_t videoout_write_sequence{0};
+inline std::mutex render_failure_trace_mutex;
+inline FirstSkippedDrawTrace first_skipped_draw{};
+inline FirstShaderCompileFailureTrace first_shader_compile_failure{};
 
 inline bool EnvEnabled(const char* name) {
     const char* value = std::getenv(name);
@@ -98,6 +120,49 @@ inline bool IsAudioInitialized() {
 inline const char* GetAudioInitSource() {
     const char* source = audio_init_source.load(std::memory_order_relaxed);
     return source != nullptr ? source : "none";
+}
+
+inline void RecordFirstSkippedDraw(u64 tick, u32 mrt_mask, u32 num_color_attachments,
+                                   bool has_depth, bool has_stencil, u32 width, u32 height) {
+    std::scoped_lock lock{render_failure_trace_mutex};
+    if (first_skipped_draw.seen) {
+        return;
+    }
+    first_skipped_draw = {
+        .seen = true,
+        .tick = tick,
+        .mrt_mask = mrt_mask,
+        .num_color_attachments = num_color_attachments,
+        .has_depth = has_depth,
+        .has_stencil = has_stencil,
+        .width = width,
+        .height = height,
+    };
+}
+
+inline FirstSkippedDrawTrace GetFirstSkippedDraw() {
+    std::scoped_lock lock{render_failure_trace_mutex};
+    return first_skipped_draw;
+}
+
+inline void RecordFirstShaderCompileFailure(const char* op, u32 stage, u64 code_words,
+                                            u64 result = 0) {
+    std::scoped_lock lock{render_failure_trace_mutex};
+    if (first_shader_compile_failure.seen) {
+        return;
+    }
+    first_shader_compile_failure = {
+        .seen = true,
+        .op = op,
+        .stage = stage,
+        .code_words = code_words,
+        .result = result,
+    };
+}
+
+inline FirstShaderCompileFailureTrace GetFirstShaderCompileFailure() {
+    std::scoped_lock lock{render_failure_trace_mutex};
+    return first_shader_compile_failure;
 }
 
 inline bool RangesOverlap(u64 lhs_address, u64 lhs_size, u64 rhs_address, u64 rhs_size) {

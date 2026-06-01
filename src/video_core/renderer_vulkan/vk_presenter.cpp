@@ -807,6 +807,8 @@ static void ProcessBlackWatchdogReadbacks(
         watchdog->last_stats[stage_index] = stats;
 
         const auto& ctx = readback.watchdog_context;
+        const auto first_skipped_draw = Common::Trace::GetFirstSkippedDraw();
+        const auto first_shader_failure = Common::Trace::GetFirstShaderCompileFailure();
         LOG_INFO(Render_Vulkan,
                  "TRACE_BLACK_WATCHDOG stage={} frame={} active={} black={} consecutive={} "
                  "size={}x{} format={} avg_luma={:.2f} variance={:.2f} max_luma={} "
@@ -818,7 +820,11 @@ static void ProcessBlackWatchdogReadbacks(
                  "videoout_addr={:#x} image_id={} guest_size={} flags={:#x} "
                  "usage=t{}s{}rt{}dt{} samples={} backing_samples={} layout={} cmask={:#x} "
                  "fmask={:#x} htile={:#x} frame_image={:#x} frame_view={:#x} "
-                 "frame_texture={:#x}",
+                 "frame_texture={:#x} first_skipped_draw={} first_skipped_tick={} "
+                 "first_skipped_mrt={:#x} first_skipped_attachments={} first_skipped_depth={} "
+                 "first_skipped_stencil={} first_skipped_extent={}x{} "
+                 "first_shader_failure={} first_shader_failure_op={} first_shader_failure_stage={} "
+                 "first_shader_failure_words={} first_shader_failure_result={:#x}",
                  ScreenshotKindName(readback.kind), ctx.frame_index,
                  watchdog->saw_nonblack_game_frame, is_black,
                  watchdog->consecutive_black[stage_index], readback.width, readback.height,
@@ -832,7 +838,14 @@ static void ProcessBlackWatchdogReadbacks(
                  ctx.guest_size, ctx.flags, ctx.usage_texture, ctx.usage_storage,
                  ctx.usage_render_target, ctx.usage_depth_target, ctx.image_samples,
                  ctx.backing_samples, vk::to_string(ctx.layout), ctx.cmask_addr, ctx.fmask_addr,
-                 ctx.htile_addr, ctx.frame_image, ctx.frame_view, ctx.frame_texture);
+                 ctx.htile_addr, ctx.frame_image, ctx.frame_view, ctx.frame_texture,
+                 first_skipped_draw.seen, first_skipped_draw.tick, first_skipped_draw.mrt_mask,
+                 first_skipped_draw.num_color_attachments, first_skipped_draw.has_depth,
+                 first_skipped_draw.has_stencil, first_skipped_draw.width,
+                 first_skipped_draw.height, first_shader_failure.seen,
+                 first_shader_failure.op ? first_shader_failure.op : "none",
+                 first_shader_failure.stage, first_shader_failure.code_words,
+                 first_shader_failure.result);
 
         const bool persistent_unexpected_black =
             watchdog->saw_nonblack_game_frame && is_black &&
@@ -845,14 +858,19 @@ static void ProcessBlackWatchdogReadbacks(
                         "TRACE_BLACK_WATCHDOG persistent_black_no_writer stage={} frame={} "
                         "consecutive={} threshold={} videoout_addr={:#x} image_id={} "
                         "usage=t{}s{}rt{}dt{} layout={} avg_luma={:.2f} variance={:.2f} max_luma={} "
-                        "near_black={:.2f}% nonblack={}",
+                        "near_black={:.2f}% nonblack={} first_skipped_draw={} "
+                        "first_skipped_tick={} first_skipped_mrt={:#x} first_shader_failure={} "
+                        "first_shader_failure_op={} first_shader_failure_stage={}",
                         ScreenshotKindName(readback.kind), ctx.frame_index,
                         watchdog->consecutive_black[stage_index],
                         watchdog->config.consecutive_frames, ctx.videoout_addr, ctx.image_id,
                         ctx.usage_texture, ctx.usage_storage, ctx.usage_render_target,
                         ctx.usage_depth_target, vk::to_string(ctx.layout), stats.avg_luma,
                         stats.variance, stats.max_luma, stats.near_black_pct,
-                        stats.nonblack_pixels);
+                        stats.nonblack_pixels, first_skipped_draw.seen, first_skipped_draw.tick,
+                        first_skipped_draw.mrt_mask, first_shader_failure.seen,
+                        first_shader_failure.op ? first_shader_failure.op : "none",
+                        first_shader_failure.stage);
         }
 
         ASSERT_MSG(!persistent_unexpected_black ||

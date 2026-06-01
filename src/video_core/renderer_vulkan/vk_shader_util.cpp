@@ -7,6 +7,7 @@
 #include <glslang/SPIRV/GlslangToSpv.h>
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/trace_control.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
 namespace Vulkan {
@@ -202,6 +203,8 @@ vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, v
     std::string preprocessedStr;
     if (!shader->preprocess(&DefaultTBuiltInResource, default_version, profile, false, true,
                             messages, &preprocessedStr, includer)) [[unlikely]] {
+        Common::Trace::RecordFirstShaderCompileFailure("preprocess", static_cast<u32>(stage),
+                                                       code.size() / sizeof(u32));
         LOG_ERROR(Render_Vulkan,
                   "Shader preprocess error\n"
                   "Shader Info Log:\n"
@@ -213,6 +216,8 @@ vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, v
 
     if (!shader->parse(&DefaultTBuiltInResource, default_version, profile, false, true, messages,
                        includer)) [[unlikely]] {
+        Common::Trace::RecordFirstShaderCompileFailure("parse", static_cast<u32>(stage),
+                                                       code.size() / sizeof(u32));
         LOG_ERROR(Render_Vulkan,
                   "Shader parse error\n"
                   "Shader Info Log:\n"
@@ -226,6 +231,8 @@ vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, v
     auto program = std::make_unique<glslang::TProgram>();
     program->addShader(shader.get());
     if (!program->link(messages)) {
+        Common::Trace::RecordFirstShaderCompileFailure("link", static_cast<u32>(stage),
+                                                       code.size() / sizeof(u32));
         LOG_ERROR(Render_Vulkan,
                   "Shader link error\n"
                   "Program Info Log:\n"
@@ -261,6 +268,10 @@ vk::ShaderModule CompileSPV(std::span<const u32> code, vk::Device device) {
     };
 
     auto [module_result, module] = device.createShaderModule(shader_info);
+    if (module_result != vk::Result::eSuccess) [[unlikely]] {
+        Common::Trace::RecordFirstShaderCompileFailure(
+            "create_module", 0, code.size(), static_cast<u64>(static_cast<VkResult>(module_result)));
+    }
     ASSERT_MSG(module_result == vk::Result::eSuccess, "Failed to compile SPIR-V shader: {}",
                vk::to_string(module_result));
     return module;

@@ -355,6 +355,10 @@ void Rasterizer::DumpRenderTargetSetOnSkippedDraw(const GraphicsPipeline* pipeli
         state.num_color_attachments, static_cast<bool>(state.depth_stencil_attachment.has_depth),
         static_cast<bool>(state.depth_stencil_attachment.has_stencil), state.width, state.height,
         state.num_layers);
+    Common::Trace::RecordFirstSkippedDraw(
+        tick, key.mrt_mask, state.num_color_attachments,
+        static_cast<bool>(state.depth_stencil_attachment.has_depth),
+        static_cast<bool>(state.depth_stencil_attachment.has_stencil), state.width, state.height);
 
     for (u32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS; ++cb) {
         const auto& col_buf = regs.color_buffers[cb];
