@@ -48,13 +48,13 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 31. [ ] Vertex/instance counts non-absurd; vertex offset within buffer.
 32. [~] Indirect draw: args buffer (base + stride*max_count) and count buffer (count_base + 4) in bounds at DrawIndirect (todo: indirect dispatch site).
 33. [~] Viewport/scissor non-negative warn at UpdateViewportScissorState (todo: within-framebuffer / render-area <= min attachment extent).
-34. [ ] Pipeline attachment formats match BeginRendering attachments (assert the depth-format mismatch class).
+34. [ ] Pipeline attachment formats match BeginRendering attachments. NOTE: needs the pipeline's real createInfo depth/color format exposed (recomputing via GetSupportedFormat would false-positive on every legitimate format substitution). Defer until GraphicsPipeline exposes its bound attachment formats.
 35. [ ] Log which render target failed to resolve when a draw is skipped for "no valid render attachments".
 36. [ ] Validate index type (16/32-bit) matches the bound index buffer.
 37. [ ] Warn on topologies MoltenVK software-emulates.
 
 ## TIER 2 — Descriptor & binding validity
-38. [ ] BindTextures: assert each bound view handle non-null and its image not pending-destroy.
+38. [~] BindTextures: warn when a bound image view handle is null (CheckDescriptor; todo: pending-destroy check needs lifetime tracking from #1/#45).
 39. [x] Every UBO/SSBO descriptor range <= backing buffer size (BindUBO/BindSSBO at the ObtainBuffer bind path).
 40. [ ] Sampled images in a shader-read-compatible layout at bind (not Undefined/TransferDst).
 41. [ ] Storage images bound with eStorage usage + storage-compatible format on MoltenVK.
@@ -91,7 +91,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 68. [ ] Detect depth-as-texture reads early and route through a stable non-churning path.
 
 ## TIER 3 — Memory, allocation & mapping
-69. [ ] Check every vmaCreate*/createImage result; log on failure instead of using a null handle.
+69. [x] Check every vmaCreate*/createImage result (already asserted at all 4 sites: buffer.cpp, image.cpp, tile_manager.cpp, vk_presenter.cpp).
 70. [ ] ObtainBuffer* returns a buffer covering [addr, addr+size); warn on partial coverage.
 71. [ ] Validate memory->IsValidMapping before host CopySparseMemory in the staging path.
 72. [ ] Track device memory used vs budget; warn approaching it.

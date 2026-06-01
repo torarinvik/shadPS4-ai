@@ -1227,6 +1227,14 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
 
             image_infos.emplace_back(VK_NULL_HANDLE, *image_view.image_view,
                                      image.backing->state.layout);
+            if (!*image_view.image_view) {
+                VideoCore::Diag::ReportOnce(
+                    "bindtex:nullview",
+                    fmt::format("[BindTextures] bound image view handle is null: addr={:#x} "
+                                "storage={} stage={}",
+                                image.info.guest_address, is_storage,
+                                static_cast<u32>(stage.stage)));
+            }
 
             const bool is_videoout_storage = is_storage && IsLikelyVideoOutStorageImage(image);
             const bool trace_invariant =
