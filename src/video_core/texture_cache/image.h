@@ -29,6 +29,7 @@ namespace VideoCore {
 /// called before the VmaAllocator is destroyed (from the Instance destructor) so pooled images do
 /// not outlive the allocator.
 void DrainImageReusePool(VmaAllocator allocator);
+void LogImageReusePoolMode();
 void RegisterImageViewReference(vk::Image image);
 void UnregisterImageViewReference(vk::Image image);
 

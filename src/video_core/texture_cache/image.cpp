@@ -337,6 +337,14 @@ public:
         return drained_count;
     }
 
+    void LogMode() {
+        std::scoped_lock lk{mutex};
+        LOG_INFO(Render_Vulkan,
+                 "ImageReusePool mode: enabled={} max_bytes={} max_count={} max_per_key={} "
+                 "clear_on_acquire={}",
+                 enabled, max_bytes, max_count, max_per_key_count, IsClearReusedImagesEnabled());
+    }
+
 private:
     struct Entry {
         VkImage image;
@@ -404,6 +412,10 @@ u64 ApproxImageBytes(const vk::ImageCreateInfo& ci) {
 
 void DrainImageReusePool(VmaAllocator allocator) {
     ImageReusePool::Get().Drain(allocator);
+}
+
+void LogImageReusePoolMode() {
+    ImageReusePool::Get().LogMode();
 }
 
 void RegisterImageViewReference(vk::Image image) {

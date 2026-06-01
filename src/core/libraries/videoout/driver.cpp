@@ -15,6 +15,7 @@
 #include "imgui/renderer/imgui_core.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
+#include "video_core/texture_cache/image.h"
 
 extern std::unique_ptr<Vulkan::Presenter> presenter;
 extern std::unique_ptr<AmdGpu::Liverpool> liverpool;
@@ -70,6 +71,11 @@ static u32 GetBootWatchdogSeconds() {
     return seconds;
 }
 
+static void LogBootRenderModesOnce() {
+    static std::once_flag once;
+    std::call_once(once, [] { VideoCore::LogImageReusePoolMode(); });
+}
+
 static int ValidateBufferAttribute(const BufferAttribute* attribute) {
     if (!IsSupportedPixelFormat(attribute->pixel_format)) {
         return ORBIS_VIDEO_OUT_ERROR_INVALID_PIXEL_FORMAT;
@@ -108,6 +114,7 @@ int VideoOutDriver::Open(const ServiceThreadParams* params) {
     main_port.boot_watchdog_reported = false;
     main_port.audio_watchdog_reported = false;
     main_port.open_time = std::chrono::steady_clock::now();
+    LogBootRenderModesOnce();
     liverpool->SetVoPort(&main_port);
     return 1;
 }

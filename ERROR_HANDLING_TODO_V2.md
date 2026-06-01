@@ -60,7 +60,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 32. [x] Cheap luminance/variance probe per presented frame; log blank vs drawn.
 33. [x] Warn if audio init (`sceAudioOutOpen`/Ngs2) doesn't occur within the boot window.
 34. [x] Catch early non-GPU-thread aborts (Ajm/AvPlayer/MoviePlayer2) with thread+context, not bare terminate.
-35. [ ] Log which reuse-pool mode is active at boot (A/B clarity).
+35. [x] Log which reuse-pool mode is active at boot (A/B clarity).
 36. [ ] Hash the first presented frame so black vs non-black boots are machine-distinguishable.
 37. [ ] Warn if the first VideoOut buffer is flipped before the GPU writes it (presenting uninitialized = black).
 38. [ ] Join black-boot with first skipped-draw / first shader-compile failure.
