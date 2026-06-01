@@ -283,6 +283,9 @@ public:
         entries.clear();
         total_bytes = 0;
         total_count = 0;
+        ASSERT(entries.empty());
+        ASSERT(total_count == 0);
+        ASSERT(total_bytes == 0);
     }
 
     u32 DrainForPressure(VmaAllocator allocator) {
