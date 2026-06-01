@@ -29,7 +29,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 7. [x] Warn when the deferred-destroy queue for buffers exceeds a threshold (mirror the image gauge) — buffer free-churn detector.
 8. [x] Add "ticks since last successful present" + failing-tick to the swapchain-acquire device-loss dump (present path has no tick log yet, unlike master_semaphore).
 9. [x] Quarantine experiment (env-gated): defer buffer frees an extra K submits; if the loss recedes, it is buffer-free timing; if not, it is elsewhere.
-10. [ ] Check whether the loss correlates with a specific dispatch (e.g. `dispatch x=240 y=135` = 1080p detile/compute) referencing a just-freed/recycled buffer.
+10. [x] Check whether the loss correlates with a specific dispatch (e.g. `dispatch x=240 y=135` = 1080p detile/compute) referencing a just-freed/recycled buffer.
 
 ## TIER 0B — Octagon/menu render corruption A (null color render target)
 11. [x] Name which color attachment is null + addr/format at BeginRendering, and which pipeline skips (mrt_mask) — done (`280befc1`); drove the diagnosis.

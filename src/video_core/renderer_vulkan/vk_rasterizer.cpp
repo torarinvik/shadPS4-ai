@@ -577,8 +577,12 @@ void Rasterizer::DispatchDirect() {
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
     ForceVideoOutSourceColorsIfRequested(cmdbuf, cs);
-    RecordGpuCommandDiagnostic("dispatch x=%u y=%u z=%u", cs_program.dim_x, cs_program.dim_y,
-                               cs_program.dim_z);
+    RecordGpuCommandDiagnostic(
+        "dispatch pgm=0x%llx tick=%llu x=%u y=%u z=%u threads=%ux%ux%u",
+        static_cast<unsigned long long>(cs.pgm_hash),
+        static_cast<unsigned long long>(scheduler.CurrentTick()), cs_program.dim_x,
+        cs_program.dim_y, cs_program.dim_z, cs_program.num_thread_x.full,
+        cs_program.num_thread_y.full, cs_program.num_thread_z.full);
     VideoCore::Diag::CheckDispatch("Rasterizer.Compute", cs_program.dim_x, cs_program.dim_y,
                                    cs_program.dim_z);
     VideoCore::Diag::CheckWorkgroupSize("Rasterizer.Compute", cs_program.num_thread_x.full,
@@ -614,6 +618,12 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
     const auto& cs = pipeline->GetStage(Shader::LogicalStage::Compute);
     ForceVideoOutSourceColorsIfRequested(cmdbuf, cs);
+    RecordGpuCommandDiagnostic(
+        "dispatch_indirect pgm=0x%llx tick=%llu arg=0x%llx offset=%u size=%u threads=%ux%ux%u",
+        static_cast<unsigned long long>(cs.pgm_hash),
+        static_cast<unsigned long long>(scheduler.CurrentTick()),
+        static_cast<unsigned long long>(address), offset, size, cs_program.num_thread_x.full,
+        cs_program.num_thread_y.full, cs_program.num_thread_z.full);
     cmdbuf.dispatchIndirect(buffer->Handle(), base);
     ForceVideoOutStorageColorIfRequested(cmdbuf, cs, 0, 0, 0);
 
