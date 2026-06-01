@@ -388,7 +388,21 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     }
     const auto state = BeginRendering(pipeline);
     if (!HasValidRenderAttachment(state)) {
-        LOG_WARNING(Render_Vulkan, "Skipping draw with no valid render attachments");
+        u32 null_color = 0;
+        for (u32 cb = 0; cb < state.num_color_attachments; ++cb) {
+            if (!state.color_attachments[cb].image_view) {
+                ++null_color;
+            }
+        }
+        VideoCore::Diag::ReportOnce(
+            fmt::format("skipdraw:{:#x}", pipeline->GetGraphicsKey().mrt_mask),
+            fmt::format("[Draw] skipped, no valid render attachments: color_attachments={} "
+                        "null_views={} has_depth={} has_stencil={} mrt_mask={:#x} (scene surface "
+                        "not found/created -> shows clear color only)",
+                        state.num_color_attachments, null_color,
+                        static_cast<bool>(state.depth_stencil_attachment.has_depth),
+                        static_cast<bool>(state.depth_stencil_attachment.has_stencil),
+                        pipeline->GetGraphicsKey().mrt_mask));
         return;
     }
 
@@ -1592,6 +1606,14 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     for (auto cb = 0u; cb < state.num_color_attachments; ++cb) {
         auto& [image_id, desc] = cb_descs[cb];
         if (!image_id) {
+            VideoCore::Diag::ReportOnce(
+                fmt::format("nullcolorrt:{:#x}", desc.info.guest_address),
+                fmt::format("[BeginRendering] color attachment {} has no image (render-target "
+                            "lookup returned null): addr={:#x} format={} size={}x{} -> draw will be "
+                            "skipped, scene shows clear color only",
+                            cb, desc.info.guest_address,
+                            vk::to_string(desc.info.pixel_format), desc.info.size.width,
+                            desc.info.size.height));
             state.color_attachments[cb] = {};
             continue;
         }
