@@ -49,7 +49,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 23. [x] Pool stats (hits/misses/evictions/live bytes) under a flag; warn on pathological miss rate or runaway bytes.
 24. [x] Never pool external/shared-memory or dedicated VideoOut backings; assert they take the destroy path.
 25. [x] Per-key entry cap so one churning key can't evict everything useful.
-26. [ ] Drain-on-budget-pressure before failing an allocation.
+26. [x] Drain-on-budget-pressure before failing an allocation.
 27. [ ] Assert pool empty at shutdown (debug) before `vmaDestroyAllocator`.
 28. [ ] Prefer most-recently-released entry of a key (content stability for persistent surfaces).
 29. [ ] Poison-on-evict tripwire: evicted handle must not still be referenced.

@@ -285,6 +285,27 @@ public:
         total_count = 0;
     }
 
+    u32 DrainForPressure(VmaAllocator allocator) {
+        std::scoped_lock lk{mutex};
+        const u32 drained_count = total_count;
+        const u64 drained_bytes = total_bytes;
+        for (auto& [key, bucket] : entries) {
+            for (const Entry& e : bucket) {
+                vmaDestroyImage(allocator, e.image, e.allocation);
+            }
+        }
+        entries.clear();
+        total_bytes = 0;
+        total_count = 0;
+        stat_evictions += drained_count;
+        if (drained_count != 0) {
+            LOG_WARNING(Render_Vulkan,
+                        "Drained ImageReusePool under allocation pressure: entries={} bytes={}",
+                        drained_count, drained_bytes);
+        }
+        return drained_count;
+    }
+
 private:
     struct Entry {
         VkImage image;
@@ -406,6 +427,13 @@ bool UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     VkImage unsafe_image{};
     VkResult result = vmaCreateImage(allocator, &image_ci_unsafe, &alloc_info, &unsafe_image,
                                      &allocation, nullptr);
+    if (result != VK_SUCCESS) {
+        const u32 drained_count = ImageReusePool::Get().DrainForPressure(allocator);
+        if (drained_count != 0) {
+            result = vmaCreateImage(allocator, &image_ci_unsafe, &alloc_info, &unsafe_image,
+                                    &allocation, nullptr);
+        }
+    }
     ASSERT_MSG(result == VK_SUCCESS, "Failed allocating image with error {}",
                vk::to_string(vk::Result{result}));
     image = vk::Image{unsafe_image};
