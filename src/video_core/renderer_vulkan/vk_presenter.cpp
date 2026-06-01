@@ -673,6 +673,27 @@ static LumaStats ComputeRawGuestLumaStats(const VAddr address, const u32 width, 
     return stats;
 }
 
+static u64 ComputeRawGuestFrameHash(const VAddr address, const u32 width, const u32 height,
+                                    const u32 pitch, const u32 bits_per_pixel,
+                                    const u64 guest_size) {
+    const u32 bytes_per_pixel = std::max<u32>(bits_per_pixel / 8, 1);
+    const u64 row_bytes = static_cast<u64>(std::max(width, pitch)) * bytes_per_pixel;
+    const u64 read_size = std::min<u64>(guest_size, row_bytes * height);
+    if (address == 0 || width == 0 || height == 0 || read_size == 0) {
+        return 0;
+    }
+
+    std::vector<u8> data(read_size);
+    Core::Memory::Instance()->CopySparseMemory(address, data.data(), read_size);
+
+    u64 hash = 1469598103934665603ull;
+    for (const u8 byte : data) {
+        hash ^= byte;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
 static void InvalidateReadbackBuffer(const VideoCore::Buffer& buffer) {
     if (buffer.is_coherent || buffer.SizeBytes() == 0) {
         return;
@@ -1279,6 +1300,9 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
                  usage_render_target, usage_depth_target);
     }
 
+    static std::atomic_bool first_presented_frame_hashed{false};
+    const bool hash_first_frame = !first_presented_frame_hashed.exchange(true);
+
     const bool black_watchdog_enabled =
         black_frame_watchdog != nullptr && IsStrictBlackScreenWatchdogEnabled() &&
         Common::Trace::IsBlackScreenWatchdogArmed() &&
@@ -1290,11 +1314,26 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     const auto last_write =
         Common::Trace::GetLastVideoOutWrite(cpu_address, image.info.guest_size);
     const auto guest_stats =
-        (black_watchdog_enabled || trace_present_luma)
+        (black_watchdog_enabled || trace_present_luma || hash_first_frame)
             ? ComputeRawGuestLumaStats(cpu_address, image.info.size.width, image.info.size.height,
                                        image.info.pitch, image.info.num_bits,
                                        image.info.guest_size)
             : LumaStats{};
+    if (hash_first_frame) {
+        const u64 frame_hash =
+            ComputeRawGuestFrameHash(cpu_address, image.info.size.width, image.info.size.height,
+                                     image.info.pitch, image.info.num_bits, image.info.guest_size);
+        const bool blank = guest_stats.pixel_count != 0 && guest_stats.near_black_pct >= 99.5 &&
+                           guest_stats.max_luma <= 8 && guest_stats.avg_luma <= 2.0;
+        LOG_INFO(Render_Vulkan,
+                 "FIRST_PRESENTED_FRAME hash={:#x} class={} cpu_addr={:#x} image_id={} "
+                 "size={}x{} guest_size={} avg_luma={:.2f} variance={:.2f} max_luma={} "
+                 "near_black={:.2f}% nonblack={}",
+                 frame_hash, blank ? "blank" : "drawn", cpu_address, image_id.index,
+                 image.info.size.width, image.info.size.height, image.info.guest_size,
+                 guest_stats.avg_luma, guest_stats.variance, guest_stats.max_luma,
+                 guest_stats.near_black_pct, guest_stats.nonblack_pixels);
+    }
     if (trace_present_luma) {
         const bool blank = guest_stats.pixel_count != 0 && guest_stats.near_black_pct >= 99.5 &&
                            guest_stats.max_luma <= 8 && guest_stats.avg_luma <= 2.0;
