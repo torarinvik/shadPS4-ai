@@ -38,6 +38,7 @@ struct VideoOutPort {
     bool is_hdr = false;
     bool saw_nonblank_flip = false;
     bool boot_watchdog_reported = false;
+    bool audio_watchdog_reported = false;
     std::chrono::steady_clock::time_point open_time{};
 
     s32 FindFreeGroup() const {

@@ -11,6 +11,7 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/thread.h"
+#include "common/trace_control.h"
 #include "core/libraries/audio/audioout.h"
 #include "core/libraries/audio/audioout_backend.h"
 #include "core/libraries/audio/audioout_error.h"
@@ -349,6 +350,7 @@ s32 PS4_SYSV_ABI sceAudioOutOpen(UserService::OrbisUserServiceUserId user_id,
 
     // Create handle
     s32 handle = (_type << 16) | port_id | 0x20000000;
+    Common::Trace::MarkAudioInitialized("sceAudioOutOpen");
     return handle;
 }
 

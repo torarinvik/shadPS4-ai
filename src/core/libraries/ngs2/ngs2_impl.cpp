@@ -5,6 +5,7 @@
 #include "ngs2_impl.h"
 
 #include "common/logging/log.h"
+#include "common/trace_control.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/kernel.h"
 
@@ -174,6 +175,7 @@ s32 SystemSetup(const OrbisNgs2SystemOption* option, OrbisNgs2ContextBufferInfo*
     OrbisNgs2Handle systemHandle = setupResult.systemHandle;
     if (hostBufferInfo->hostBufferSize >= requiredBufferSize) {
         *outHandle = systemHandle;
+        Common::Trace::MarkAudioInitialized("Ngs2SystemSetup");
         return ORBIS_OK;
     }
 

@@ -106,6 +106,7 @@ int VideoOutDriver::Open(const ServiceThreadParams* params) {
     main_port.is_open = true;
     main_port.saw_nonblank_flip = false;
     main_port.boot_watchdog_reported = false;
+    main_port.audio_watchdog_reported = false;
     main_port.open_time = std::chrono::steady_clock::now();
     liverpool->SetVoPort(&main_port);
     return 1;
@@ -128,6 +129,7 @@ void VideoOutDriver::Close(s32 handle) {
     main_port.prev_index = -1;
     main_port.saw_nonblank_flip = false;
     main_port.boot_watchdog_reported = false;
+    main_port.audio_watchdog_reported = false;
     main_port.open_time = {};
 
     // Clear port information
@@ -412,14 +414,28 @@ void VideoOutDriver::DrawLastFrame() {
 
 void VideoOutDriver::CheckBootWatchdog() {
     const u32 threshold_seconds = GetBootWatchdogSeconds();
-    if (threshold_seconds == 0 || !main_port.is_open || main_port.saw_nonblank_flip ||
-        main_port.boot_watchdog_reported || main_port.open_time == decltype(main_port.open_time){}) {
+    if (threshold_seconds == 0 || !main_port.is_open ||
+        main_port.open_time == decltype(main_port.open_time){}) {
         return;
     }
 
     const auto now = std::chrono::steady_clock::now();
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - main_port.open_time);
     if (elapsed.count() < threshold_seconds) {
+        return;
+    }
+
+    if (!main_port.audio_watchdog_reported && !Common::Trace::IsAudioInitialized()) {
+        main_port.audio_watchdog_reported = true;
+        LOG_WARNING(Lib_VideoOut,
+                    "BOOT_WATCHDOG audio_init_missing elapsed_s={} threshold_s={} "
+                    "audio_source={} registered_buffers={} flip_pending={} vblank_count={}",
+                    elapsed.count(), threshold_seconds, Common::Trace::GetAudioInitSource(),
+                    main_port.NumRegisteredBuffers(), main_port.flip_status.flip_pending_num,
+                    main_port.vblank_status.count);
+    }
+
+    if (main_port.saw_nonblank_flip || main_port.boot_watchdog_reported) {
         return;
     }
 

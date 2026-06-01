@@ -17,6 +17,8 @@ inline std::atomic_bool aggressive_logging{false};
 inline std::once_flag aggressive_logging_init_flag;
 inline std::atomic_bool black_screen_watchdog_armed{false};
 inline std::once_flag black_screen_watchdog_arm_init_flag;
+inline std::atomic_bool audio_initialized{false};
+inline std::atomic<const char*> audio_init_source{nullptr};
 
 struct VideoOutWriteTrace {
     const char* op{};
@@ -82,6 +84,20 @@ inline bool SetBlackScreenWatchdogArmed(bool armed) {
     EnsureBlackScreenWatchdogArmInitialized();
     black_screen_watchdog_armed.store(armed, std::memory_order_relaxed);
     return armed;
+}
+
+inline void MarkAudioInitialized(const char* source) {
+    audio_init_source.store(source, std::memory_order_relaxed);
+    audio_initialized.store(true, std::memory_order_relaxed);
+}
+
+inline bool IsAudioInitialized() {
+    return audio_initialized.load(std::memory_order_relaxed);
+}
+
+inline const char* GetAudioInitSource() {
+    const char* source = audio_init_source.load(std::memory_order_relaxed);
+    return source != nullptr ? source : "none";
 }
 
 inline bool RangesOverlap(u64 lhs_address, u64 lhs_size, u64 rhs_address, u64 rhs_size) {
