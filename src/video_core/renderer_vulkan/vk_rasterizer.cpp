@@ -1990,6 +1990,16 @@ void Rasterizer::UpdateViewportScissorState() const {
             .offset = {vp_scsr.top_left_x, vp_scsr.top_left_y},
             .extent = {vp_scsr.GetWidth(), vp_scsr.GetHeight()},
         });
+
+        if (vp_scsr.top_left_x < 0 || vp_scsr.top_left_y < 0 || viewport.width < 0.f ||
+            viewport.height < 0.f) {
+            VideoCore::Diag::ReportOnce(
+                "viewport:invalid",
+                fmt::format("[UpdateViewportScissor] vp{} invalid: scissor_tl=({},{}) vp_wh=({},{}) "
+                            "(Vulkan requires non-negative scissor offset and viewport extent)",
+                            i, vp_scsr.top_left_x, vp_scsr.top_left_y, viewport.width,
+                            viewport.height));
+        }
     }
 
     if (viewports.empty()) {

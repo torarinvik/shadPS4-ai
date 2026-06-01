@@ -47,7 +47,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 30. [x] Index buffer bounds: bound range (offset + num_indices*index_size) <= backing buffer size at BindIndexBuffer.
 31. [ ] Vertex/instance counts non-absurd; vertex offset within buffer.
 32. [~] Indirect draw: args buffer (base + stride*max_count) and count buffer (count_base + 4) in bounds at DrawIndirect (todo: indirect dispatch site).
-33. [ ] Viewport/scissor non-negative, within framebuffer; render area <= min attachment extent.
+33. [~] Viewport/scissor non-negative warn at UpdateViewportScissorState (todo: within-framebuffer / render-area <= min attachment extent).
 34. [ ] Pipeline attachment formats match BeginRendering attachments (assert the depth-format mismatch class).
 35. [ ] Log which render target failed to resolve when a draw is skipped for "no valid render attachments".
 36. [ ] Validate index type (16/32-bit) matches the bound index buffer.
