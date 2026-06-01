@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <ranges>
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 #include "common/assert.h"
 #include "common/trace_control.h"
 #include "video_core/host_diagnostics.h"
@@ -137,15 +142,195 @@ static vk::FormatFeatureFlags2 FormatFeatureFlags(const vk::ImageUsageFlags usag
     return feature_flags;
 }
 
+namespace {
+
+// Freed-image reuse pool. The texture cache aliases one guest address as multiple incompatible
+// image formats/sizes (depth<->color reinterprets, slice-expand ratchets) and recreates+frees the
+// VkImage at that address hundreds of times per second. Even though every free is correctly
+// GPU-deferred, that vmaCreateImage/vmaDestroyImage churn is what drives the intermittent MoltenVK
+// kIOGPUCommandBufferCallbackErrorInvalidResource device loss (Metal residency/heap-aliasing
+// pressure, not a Vulkan use-after-free — the lifetime gate was proven correct). Recycling the GPU
+// image objects keyed by their exact create-info eliminates that churn at the source, for every
+// recreate site, instead of patching each site. The pool only holds GPU-idle images (releases run
+// inside the deferred-destroy callback, after the lifetime gate), so a reused image is never in
+// flight.
+struct ImagePoolKey {
+    u32 flags;
+    u32 type;
+    u32 format;
+    u32 usage;
+    u32 tiling;
+    u32 samples;
+    u32 mips;
+    u32 layers;
+    u32 width;
+    u32 height;
+    u32 depth;
+    u32 initial_layout;
+
+    bool operator==(const ImagePoolKey& o) const noexcept {
+        return std::memcmp(this, &o, sizeof(ImagePoolKey)) == 0;
+    }
+};
+
+ImagePoolKey MakeImagePoolKey(const vk::ImageCreateInfo& ci) {
+    return ImagePoolKey{
+        .flags = static_cast<u32>(static_cast<VkImageCreateFlags>(ci.flags)),
+        .type = static_cast<u32>(ci.imageType),
+        .format = static_cast<u32>(ci.format),
+        .usage = static_cast<u32>(static_cast<VkImageUsageFlags>(ci.usage)),
+        .tiling = static_cast<u32>(ci.tiling),
+        .samples = static_cast<u32>(static_cast<VkSampleCountFlags>(ci.samples)),
+        .mips = ci.mipLevels,
+        .layers = ci.arrayLayers,
+        .width = ci.extent.width,
+        .height = ci.extent.height,
+        .depth = ci.extent.depth,
+        .initial_layout = static_cast<u32>(ci.initialLayout),
+    };
+}
+
+struct ImagePoolKeyHash {
+    std::size_t operator()(const ImagePoolKey& k) const noexcept {
+        const auto* p = reinterpret_cast<const u8*>(&k);
+        std::size_t h = 1469598103934665603ull; // FNV-1a
+        for (std::size_t i = 0; i < sizeof(k); ++i) {
+            h ^= p[i];
+            h *= 1099511628211ull;
+        }
+        return h;
+    }
+};
+
+class ImageReusePool {
+public:
+    static ImageReusePool& Get() {
+        static ImageReusePool pool;
+        return pool;
+    }
+
+    // Try to hand back a previously-released image matching `key`. Returns true on a hit.
+    bool Acquire(const ImagePoolKey& key, VkImage& out_image, VmaAllocation& out_alloc) {
+        if (!enabled) {
+            return false;
+        }
+        std::scoped_lock lk{mutex};
+        auto it = entries.find(key);
+        if (it == entries.end() || it->second.empty()) {
+            return false;
+        }
+        const Entry e = it->second.back();
+        it->second.pop_back();
+        total_bytes -= e.bytes;
+        --total_count;
+        out_image = e.image;
+        out_alloc = e.allocation;
+        return true;
+    }
+
+    // Return a GPU-idle image to the pool, or destroy it if pooling is disabled / over budget.
+    void Release(VmaAllocator allocator, const ImagePoolKey& key, VkImage image,
+                 VmaAllocation allocation, u64 bytes) {
+        if (image == VK_NULL_HANDLE) {
+            return;
+        }
+        if (!enabled) {
+            vmaDestroyImage(allocator, image, allocation);
+            return;
+        }
+        std::scoped_lock lk{mutex};
+        entries[key].push_back(Entry{image, allocation, bytes});
+        total_bytes += bytes;
+        ++total_count;
+        while (total_bytes > max_bytes || total_count > max_count) {
+            if (!EvictOne(allocator)) {
+                break;
+            }
+        }
+    }
+
+    // Destroy all pooled images and disable further pooling (called before the allocator dies).
+    void Drain(VmaAllocator allocator) {
+        std::scoped_lock lk{mutex};
+        enabled = false;
+        for (auto& [key, bucket] : entries) {
+            for (const Entry& e : bucket) {
+                vmaDestroyImage(allocator, e.image, e.allocation);
+            }
+        }
+        entries.clear();
+        total_bytes = 0;
+        total_count = 0;
+    }
+
+private:
+    struct Entry {
+        VkImage image;
+        VmaAllocation allocation;
+        u64 bytes;
+    };
+
+    ImageReusePool() {
+        if (const char* v = std::getenv("SHADPS4_IMAGE_REUSE_POOL")) {
+            enabled = std::strcmp(v, "0") != 0;
+        }
+        if (const char* v = std::getenv("SHADPS4_IMAGE_REUSE_POOL_MAX_MB")) {
+            const unsigned long mb = std::strtoul(v, nullptr, 10);
+            if (mb > 0) {
+                max_bytes = static_cast<u64>(mb) * 1024 * 1024;
+            }
+        }
+    }
+
+    // Evict one entry from any non-empty bucket (caller holds the lock).
+    bool EvictOne(VmaAllocator allocator) {
+        for (auto& [key, bucket] : entries) {
+            if (!bucket.empty()) {
+                const Entry e = bucket.back();
+                bucket.pop_back();
+                vmaDestroyImage(allocator, e.image, e.allocation);
+                total_bytes -= e.bytes;
+                --total_count;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool enabled = true;
+    u64 max_bytes = 512ull * 1024 * 1024; // default 512 MB of idle pooled images
+    u32 max_count = 512;
+    u64 total_bytes = 0;
+    u32 total_count = 0;
+    std::unordered_map<ImagePoolKey, std::vector<Entry>, ImagePoolKeyHash> entries;
+    std::mutex mutex;
+};
+
+// Rough byte estimate for pool budgeting (does not need to be exact).
+u64 ApproxImageBytes(const vk::ImageCreateInfo& ci) {
+    const u64 texels = static_cast<u64>(ci.extent.width) * std::max<u32>(ci.extent.height, 1) *
+                       std::max<u32>(ci.extent.depth, 1) * std::max<u32>(ci.arrayLayers, 1);
+    const u64 samples = std::max<u32>(static_cast<u32>(static_cast<VkSampleCountFlags>(ci.samples)), 1);
+    return texels * samples * 4ull; // assume <= 4 bytes/texel (sufficient for a cap heuristic)
+}
+
+} // namespace
+
+void DrainImageReusePool(VmaAllocator allocator) {
+    ImageReusePool::Get().Drain(allocator);
+}
+
 UniqueImage::~UniqueImage() {
     if (image) {
-        vmaDestroyImage(allocator, image, allocation);
+        ImageReusePool::Get().Release(allocator, MakeImagePoolKey(image_ci), image, allocation,
+                                      ApproxImageBytes(image_ci));
     }
 }
 
 void UniqueImage::Destroy() {
     if (image) {
-        vmaDestroyImage(allocator, image, allocation);
+        ImageReusePool::Get().Release(allocator, MakeImagePoolKey(image_ci), image, allocation,
+                                      ApproxImageBytes(image_ci));
         image = vk::Image{};
         allocation = {};
     }
@@ -154,6 +339,19 @@ void UniqueImage::Destroy() {
 void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     this->image_ci = image_ci;
     ASSERT(!image);
+
+    // Reuse a GPU-idle image of identical create-info if one is pooled, avoiding the
+    // vmaCreateImage/vmaDestroyImage churn that drives the MoltenVK device loss.
+    {
+        VkImage reused{};
+        VmaAllocation reused_alloc{};
+        if (ImageReusePool::Get().Acquire(MakeImagePoolKey(image_ci), reused, reused_alloc)) {
+            image = vk::Image{reused};
+            allocation = reused_alloc;
+            return;
+        }
+    }
+
     const VmaAllocationCreateInfo alloc_info = {
         .flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT,
         .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,

@@ -16,6 +16,11 @@
 
 #include <vk_mem_alloc.h>
 
+// Defined in texture_cache/image.cpp; drains the freed-image reuse pool before the allocator dies.
+namespace VideoCore {
+void DrainImageReusePool(VmaAllocator allocator);
+}
+
 namespace Vulkan {
 
 namespace {
@@ -174,6 +179,8 @@ Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
 
 Instance::~Instance() {
     ImGui::Core::Shutdown(GetDevice());
+    // Release any images held in the reuse pool before the allocator is destroyed.
+    ::VideoCore::DrainImageReusePool(allocator);
     vmaDestroyAllocator(allocator);
 }
 

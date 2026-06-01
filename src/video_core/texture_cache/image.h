@@ -25,6 +25,11 @@ VK_DEFINE_HANDLE(VmaAllocator)
 
 namespace VideoCore {
 
+/// Destroys every image held in the freed-image reuse pool and disables further pooling. Must be
+/// called before the VmaAllocator is destroyed (from the Instance destructor) so pooled images do
+/// not outlive the allocator.
+void DrainImageReusePool(VmaAllocator allocator);
+
 enum ImageFlagBits : u32 {
     Empty = 0,
     MaybeCpuDirty = 1 << 0, ///< The page this image is in was touched before the image address
