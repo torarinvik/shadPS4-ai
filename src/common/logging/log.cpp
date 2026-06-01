@@ -4,7 +4,10 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <unordered_map>
+#include <vector>
 #include <fmt/std.h>
+#include <spdlog/sinks/base_sink.h>
 
 #include "common/assert.h"
 #include "common/config.h"
@@ -171,6 +174,52 @@ static auto UpdateColorLevels(T sink) {
     return sink;
 }
 
+// A sink that suppresses a message once its exact formatted payload has already been emitted, so a
+// warning/info that repeats — even when interleaved with other lines (which the strictly-consecutive
+// dup_filter_sink misses) — is logged once instead of flooding the log. A periodic heartbeat
+// re-emits a persistently-repeating line every kHeartbeat occurrences so the condition stays
+// visible, and errors/critical are always passed through so important repeats are never hidden. The
+// seen-set is bounded and cleared when large.
+class ContentDedupSink final : public spdlog::sinks::base_sink<std::mutex> {
+public:
+    explicit ContentDedupSink(std::vector<spdlog::sink_ptr> downstream)
+        : downstream_sinks(std::move(downstream)) {}
+
+protected:
+    void sink_it_(const spdlog::details::log_msg& msg) override {
+        // Dedup only info/warn (the floods); always forward errors and above.
+        if (msg.log_level < spdlog::level::err) {
+            const std::string_view payload(msg.payload.data(), msg.payload.size());
+            const std::size_t key = std::hash<std::string_view>{}(payload);
+            auto [it, inserted] = counts.try_emplace(key, 0);
+            const u64 n = ++it->second;
+            if (!inserted && (n % kHeartbeat) != 0) {
+                return; // already seen this message; suppress until the next heartbeat
+            }
+            if (counts.size() > kMaxEntries) {
+                counts.clear();
+            }
+        }
+        for (auto& sink : downstream_sinks) {
+            if (sink->should_log(msg.log_level)) {
+                sink->log(msg);
+            }
+        }
+    }
+
+    void flush_() override {
+        for (auto& sink : downstream_sinks) {
+            sink->flush();
+        }
+    }
+
+private:
+    static constexpr u64 kHeartbeat = 1000;      // re-emit a repeating line every 1000 occurrences
+    static constexpr std::size_t kMaxEntries = 16384; // bound the seen-set memory
+    std::vector<spdlog::sink_ptr> downstream_sinks;
+    std::unordered_map<std::size_t, u64> counts;
+};
+
 void Setup(std::string_view log_filename) {
     static bool already_registered = false;
 
@@ -204,10 +253,11 @@ void Setup(std::string_view log_filename) {
     std::initializer_list<spdlog::sink_ptr> async_sink{std::make_shared<spdlog::sinks::async_sink>(
         spdlog::sinks::async_sink::config{.sinks = sinks})};
 
-    std::initializer_list<spdlog::sink_ptr> dup_filter{
-        std::make_shared<spdlog::sinks::dup_filter_sink_mt>(
-            std::chrono::milliseconds(EmulatorSettings.GetLogMaxSkipDuration()),
-            EmulatorSettings.IsLogSync() ? sinks : async_sink)};
+    // Content-based de-duplication: logs each unique formatted message once (with a heartbeat),
+    // suppressing repeats even when they are interleaved with other lines. Supersedes the strictly-
+    // consecutive dup_filter_sink, which the interleaved GPU warning floods evade.
+    std::initializer_list<spdlog::sink_ptr> dup_filter{std::make_shared<ContentDedupSink>(
+        std::vector<spdlog::sink_ptr>(EmulatorSettings.IsLogSync() ? sinks : async_sink))};
 
     spdlog::level default_log_level = spdlog::level::info;
     std::unordered_map<std::string, spdlog::level> log_level_per_class;
