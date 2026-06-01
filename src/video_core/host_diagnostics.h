@@ -139,6 +139,16 @@ inline void NoteBufferChurn(u64 guest_addr, u64 size) {
     }
 }
 
+inline void NotePendingBufferDestroyDepth(u32 depth) {
+    if (depth == 256 || depth == 512 || depth == 1024) {
+        ReportOnce(fmt::format("pending_buffer_destroy_depth:{}", depth),
+                   fmt::format("buffer deferred-destroy queue has {} pending buffers; if this "
+                               "climbs during a device-loss run, buffer lifetime/churn is a "
+                               "primary suspect",
+                               depth));
+    }
+}
+
 // When SHADPS4_TRACE_FREES=1, GPU-resource destructions are logged at the moment they actually run
 // (the deferred-destroy callback firing -> vmaDestroy). Used to correlate a freed resource with a
 // subsequent kIOGPU "Invalid Resource" device loss: the last resource freed before the loss, on the

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <atomic>
 #include <vector>
 #include "common/assert.h"
 #include "common/alignment.h"
@@ -43,6 +44,8 @@ static constexpr size_t StagingBufferSize = 512_MB;
 static constexpr size_t DownloadBufferSize = 32_MB;
 static constexpr size_t UboStreamBufferSize = 64_MB;
 static constexpr size_t DeviceBufferSize = 128_MB;
+
+static std::atomic<u32> pending_buffer_destroys = 0;
 
 BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
                          AmdGpu::Liverpool* liverpool_, TextureCache& texture_cache_,
@@ -1049,7 +1052,10 @@ void BufferCache::DeleteBuffer(BufferId buffer_id) {
     const VAddr trace_addr = buffer.CpuAddr();
     const u64 trace_size = buffer.SizeBytes();
     const u64 reg_tick = scheduler.CurrentTick();
+    const u32 pending_depth = pending_buffer_destroys.fetch_add(1, std::memory_order_relaxed) + 1;
+    VideoCore::Diag::NotePendingBufferDestroyDepth(pending_depth);
     scheduler.DeferOperationAfterSubmit([this, buffer_id, trace_addr, trace_size, reg_tick] {
+        pending_buffer_destroys.fetch_sub(1, std::memory_order_relaxed);
         if (VideoCore::Diag::TraceFrees()) {
             LOG_INFO(Render_Vulkan, "FREE buffer addr={:#x} size={}", trace_addr, trace_size);
         }

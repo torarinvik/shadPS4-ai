@@ -26,7 +26,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 4. [x] On device loss, log WHICH command buffer index failed + map it to the scheduler (draw/present/flip) and its in-flight tick range.
 5. [x] Record buffer FREEs in the ring already (done) — also record buffer CREATEs so a create/free pair at the same addr within N ops is flagged (churn signature).
 6. [x] Validate `BufferCache::SynchronizeBuffer`'s src buffer size (the one copy site still unchecked — src is a raw handle) by threading the size through.
-7. [ ] Warn when the deferred-destroy queue for buffers exceeds a threshold (mirror the image gauge) — buffer free-churn detector.
+7. [x] Warn when the deferred-destroy queue for buffers exceeds a threshold (mirror the image gauge) — buffer free-churn detector.
 8. [ ] Add "ticks since last successful present" + failing-tick to the swapchain-acquire device-loss dump (present path has no tick log yet, unlike master_semaphore).
 9. [ ] Quarantine experiment (env-gated): defer buffer frees an extra K submits; if the loss recedes, it is buffer-free timing; if not, it is elsewhere.
 10. [ ] Check whether the loss correlates with a specific dispatch (e.g. `dispatch x=240 y=135` = 1080p detile/compute) referencing a just-freed/recycled buffer.
