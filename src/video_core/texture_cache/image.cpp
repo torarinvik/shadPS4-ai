@@ -142,6 +142,11 @@ static vk::FormatFeatureFlags2 FormatFeatureFlags(const vk::ImageUsageFlags usag
     return feature_flags;
 }
 
+static bool IsClearReusedImagesEnabled() {
+    static const bool enabled = Common::Trace::EnvEnabled("SHADPS4_IMAGE_REUSE_POOL_CLEAR_ON_ACQUIRE");
+    return enabled;
+}
+
 namespace {
 
 // Freed-image reuse pool. The texture cache aliases one guest address as multiple incompatible
@@ -471,6 +476,31 @@ Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
             static_cast<unsigned long long>(info.guest_address), info.guest_size,
             vk::to_string(info.pixel_format).c_str(), info.size.width, info.size.height,
             info.resources.layers, info.num_samples);
+        if (IsClearReusedImagesEnabled()) {
+            scheduler->EndRendering();
+            Transit(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite, {});
+            const vk::ImageSubresourceRange range = {
+                .aspectMask = aspect_mask,
+                .baseMipLevel = 0,
+                .levelCount = static_cast<u32>(info.resources.levels),
+                .baseArrayLayer = 0,
+                .layerCount = static_cast<u32>(info.resources.layers),
+            };
+            const auto cmdbuf = scheduler->CommandBuffer();
+            if (info.props.is_depth) {
+                cmdbuf.clearDepthStencilImage(GetImage(), vk::ImageLayout::eTransferDstOptimal,
+                                              vk::ClearDepthStencilValue{0.0f, 0}, range);
+            } else {
+                cmdbuf.clearColorImage(GetImage(), vk::ImageLayout::eTransferDstOptimal,
+                                       vk::ClearColorValue{}, range);
+            }
+            RecordGpuCommandDiagnostic(
+                "IMAGE_POOL clear_on_acquire addr=0x%llx size=%u format=%s extent=%ux%u "
+                "layers=%u samples=%u",
+                static_cast<unsigned long long>(info.guest_address), info.guest_size,
+                vk::to_string(info.pixel_format).c_str(), info.size.width, info.size.height,
+                info.resources.layers, info.num_samples);
+        }
     }
 
     Vulkan::SetObjectName(instance->GetDevice(), GetImage(),

@@ -44,7 +44,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 20. [x] Env-gated one-shot capture request on first skipped-draw to grab the corrupt frame offline.
 
 ## TIER 0C — Image reuse pool correctness & safety (new code)
-21. [ ] Env-gated clear/zero of a recycled image on acquire to test stale-content as a cause of A / black-boot.
+21. [x] Env-gated clear/zero of a recycled image on acquire to test stale-content as a cause of A / black-boot.
 22. [ ] Assert a pooled image is GPU-idle on release (owning tick GPU-complete).
 23. [x] Pool stats (hits/misses/evictions/live bytes) under a flag; warn on pathological miss rate or runaway bytes.
 24. [ ] Never pool external/shared-memory or dedicated VideoOut backings; assert they take the destroy path.
