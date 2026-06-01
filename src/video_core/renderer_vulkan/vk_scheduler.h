@@ -477,7 +477,13 @@ public:
     /// Waiting one extra tick guarantees the current recording has been submitted and
     /// completed first.
     void DeferOperationAfterSubmit(Common::UniqueFunction<void>&& func) {
-        PendingOp op{std::move(func), CurrentTick() + 1};
+        DeferOperationAfterSubmit(std::move(func), 1);
+    }
+
+    /// Defers an operation until the GPU has completed the current recording plus extra submitted
+    /// ticks. Used by diagnostics to widen a lifetime gate without changing call-site ownership.
+    void DeferOperationAfterSubmit(Common::UniqueFunction<void>&& func, u64 extra_submits) {
+        PendingOp op{std::move(func), CurrentTick() + extra_submits};
         CaptureSiblingWaits(op);
         pending_ops.emplace(std::move(op));
         if (pending_ops.size() > kDeferredQueueWarnThreshold) {

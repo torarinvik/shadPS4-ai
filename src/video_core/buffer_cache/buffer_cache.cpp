@@ -47,6 +47,16 @@ static constexpr size_t DeviceBufferSize = 128_MB;
 
 static std::atomic<u32> pending_buffer_destroys = 0;
 
+static u64 BufferFreeExtraSubmits() {
+    static const u64 extra_submits = [] {
+        if (const char* value = std::getenv("SHADPS4_BUFFER_FREE_EXTRA_SUBMITS")) {
+            return std::strtoull(value, nullptr, 10);
+        }
+        return 1ull;
+    }();
+    return extra_submits;
+}
+
 BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
                          AmdGpu::Liverpool* liverpool_, TextureCache& texture_cache_,
                          PageManager& tracker)
@@ -1054,18 +1064,29 @@ void BufferCache::DeleteBuffer(BufferId buffer_id) {
     const u64 reg_tick = scheduler.CurrentTick();
     const u32 pending_depth = pending_buffer_destroys.fetch_add(1, std::memory_order_relaxed) + 1;
     VideoCore::Diag::NotePendingBufferDestroyDepth(pending_depth);
-    scheduler.DeferOperationAfterSubmit([this, buffer_id, trace_addr, trace_size, reg_tick] {
+    const u64 extra_submits = BufferFreeExtraSubmits();
+    if (extra_submits > 1) {
+        VideoCore::Diag::ReportOnce(
+            "buffer_free_extra_submits",
+            fmt::format("SHADPS4_BUFFER_FREE_EXTRA_SUBMITS={} active: buffer destroys/pool "
+                        "releases are quarantined for extra submitted ticks",
+                        extra_submits));
+    }
+    scheduler.DeferOperationAfterSubmit([this, buffer_id, trace_addr, trace_size, reg_tick,
+                                         extra_submits] {
         pending_buffer_destroys.fetch_sub(1, std::memory_order_relaxed);
         if (VideoCore::Diag::TraceFrees()) {
-            LOG_INFO(Render_Vulkan, "FREE buffer addr={:#x} size={}", trace_addr, trace_size);
+            LOG_INFO(Render_Vulkan, "FREE buffer addr={:#x} size={} extra_submits={}", trace_addr,
+                     trace_size, extra_submits);
         }
         Vulkan::RecordGpuCommandDiagnostic(
-            "FREE buffer addr=0x%llx size=%llu reg_tick=%llu",
+            "FREE buffer addr=0x%llx size=%llu reg_tick=%llu extra_submits=%llu",
             static_cast<unsigned long long>(trace_addr),
             static_cast<unsigned long long>(trace_size),
-            static_cast<unsigned long long>(reg_tick));
+            static_cast<unsigned long long>(reg_tick),
+            static_cast<unsigned long long>(extra_submits));
         slot_buffers.erase(buffer_id);
-    });
+    }, extra_submits);
     buffer.is_deleted = true;
 }
 
