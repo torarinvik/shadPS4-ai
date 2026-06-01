@@ -100,6 +100,19 @@ public:
         return key;
     }
 
+    vk::Format GetColorAttachmentFormat(u32 index) const {
+        return index < color_attachment_formats.size() ? color_attachment_formats[index]
+                                                       : vk::Format::eUndefined;
+    }
+
+    vk::Format GetDepthAttachmentFormat() const {
+        return depth_attachment_format;
+    }
+
+    vk::Format GetStencilAttachmentFormat() const {
+        return stencil_attachment_format;
+    }
+
     /// Gets the attributes and bindings for vertex inputs.
     template <typename Attribute, typename Binding>
     void GetVertexInputs(VertexInputs<Attribute>& attributes, VertexInputs<Binding>& bindings,
@@ -112,6 +125,9 @@ private:
 
 private:
     GraphicsPipelineKey key;
+    std::array<vk::Format, AmdGpu::NUM_COLOR_BUFFERS> color_attachment_formats{};
+    vk::Format depth_attachment_format{};
+    vk::Format stencil_attachment_format{};
     std::optional<const Shader::Gcn::FetchShaderData> fetch_shader{};
 };
 

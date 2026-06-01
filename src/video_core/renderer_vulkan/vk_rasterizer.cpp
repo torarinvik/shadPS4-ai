@@ -1801,6 +1801,23 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
                             image->backing ? vk::to_string(image->backing->state.layout)
                                            : "no_backing"));
         }
+        const vk::Format pipeline_format = pipeline->GetColorAttachmentFormat(cb);
+        const vk::Format view_format =
+            instance.GetSupportedFormat(image_view.info.format,
+                                        vk::FormatFeatureFlagBits2::eColorAttachment);
+        if (pipeline_format != vk::Format::eUndefined && pipeline_format != view_format) {
+            VideoCore::Diag::ReportOnce(
+                fmt::format("pipeline_color_format_mismatch:{}:{}:{}", cb,
+                            static_cast<u32>(pipeline_format), static_cast<u32>(view_format)),
+                fmt::format("[BeginRendering] color attachment {} format mismatch: "
+                            "pipeline_create_info={} view={} requested_view={} image={} "
+                            "image_id={} addr={:#x} mrt_mask={:#x} -> draw may fail dynamic "
+                            "rendering validation",
+                            cb, vk::to_string(pipeline_format), vk::to_string(view_format),
+                            vk::to_string(image_view.info.format),
+                            vk::to_string(image->info.pixel_format), image_id.index,
+                            desc.info.guest_address, key.mrt_mask));
+        }
         const auto slice = image_view.info.range.base.layer;
         const auto mip = image_view.info.range.base.level;
 
@@ -1918,6 +1935,37 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
             attachment.clear_value[1] = is_stencil_clear ? regs.stencil_clear : 0u;
             attachment.has_stencil = true;
             attachment.stencil_clear = is_stencil_clear;
+        }
+        const vk::Format depth_view_format = instance.GetSupportedFormat(
+            image_view.info.format, vk::FormatFeatureFlagBits2::eDepthStencilAttachment);
+        if (attachment.has_depth && pipeline->GetDepthAttachmentFormat() != vk::Format::eUndefined &&
+            pipeline->GetDepthAttachmentFormat() != depth_view_format) {
+            VideoCore::Diag::ReportOnce(
+                fmt::format("pipeline_depth_format_mismatch:{}:{}",
+                            static_cast<u32>(pipeline->GetDepthAttachmentFormat()),
+                            static_cast<u32>(depth_view_format)),
+                fmt::format("[BeginRendering] depth attachment format mismatch: "
+                            "pipeline_create_info={} view={} requested_view={} image={} "
+                            "image_id={} depth_addr={:#x} htile={:#x}",
+                            vk::to_string(pipeline->GetDepthAttachmentFormat()),
+                            vk::to_string(depth_view_format), vk::to_string(image_view.info.format),
+                            vk::to_string(image.info.pixel_format), image_id.index,
+                            regs.depth_buffer.DepthAddress(), htile_address));
+        }
+        if (attachment.has_stencil &&
+            pipeline->GetStencilAttachmentFormat() != vk::Format::eUndefined &&
+            pipeline->GetStencilAttachmentFormat() != depth_view_format) {
+            VideoCore::Diag::ReportOnce(
+                fmt::format("pipeline_stencil_format_mismatch:{}:{}",
+                            static_cast<u32>(pipeline->GetStencilAttachmentFormat()),
+                            static_cast<u32>(depth_view_format)),
+                fmt::format("[BeginRendering] stencil attachment format mismatch: "
+                            "pipeline_create_info={} view={} requested_view={} image={} "
+                            "image_id={} stencil_addr={:#x} htile={:#x}",
+                            vk::to_string(pipeline->GetStencilAttachmentFormat()),
+                            vk::to_string(depth_view_format), vk::to_string(image_view.info.format),
+                            vk::to_string(image.info.pixel_format), image_id.index,
+                            regs.depth_buffer.StencilAddress(), htile_address));
         }
 
         if (log_render_pass) {

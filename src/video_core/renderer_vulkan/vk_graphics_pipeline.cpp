@@ -238,7 +238,8 @@ GraphicsPipeline::GraphicsPipeline(
     const auto depth_format =
         instance.GetSupportedFormat(LiverpoolToVK::DepthFormat(key.z_format, key.stencil_format),
                                     vk::FormatFeatureFlagBits2::eDepthStencilAttachment);
-    std::array<vk::Format, Shader::IR::NumRenderTargets> color_formats;
+    std::array<vk::Format, Shader::IR::NumRenderTargets> color_formats{};
+    color_formats.fill(vk::Format::eUndefined);
     for (s32 i = 0; i < key.num_color_attachments; ++i) {
         const auto& col_buf = key.color_buffers[i];
         const auto format = LiverpoolToVK::SurfaceFormat(col_buf.data_format, col_buf.num_format);
@@ -252,6 +253,14 @@ GraphicsPipeline::GraphicsPipeline(
         }
         color_formats[i] = color_format;
     }
+    std::ranges::copy_n(color_formats.begin(), color_attachment_formats.size(),
+                        color_attachment_formats.begin());
+    depth_attachment_format = key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid
+                                  ? depth_format
+                                  : vk::Format::eUndefined;
+    stencil_attachment_format = key.stencil_format != AmdGpu::DepthBuffer::StencilFormat::Invalid
+                                    ? depth_format
+                                    : vk::Format::eUndefined;
 
     std::array<vk::SampleCountFlagBits, AmdGpu::NUM_COLOR_BUFFERS> color_samples;
     std::ranges::transform(key.color_samples, color_samples.begin(), [&instance](u8 num_samples) {
@@ -269,12 +278,8 @@ GraphicsPipeline::GraphicsPipeline(
         .pNext = instance.IsMixedDepthSamplesSupported() ? &mixed_samples : nullptr,
         .colorAttachmentCount = key.num_color_attachments,
         .pColorAttachmentFormats = color_formats.data(),
-        .depthAttachmentFormat = key.z_format != AmdGpu::DepthBuffer::ZFormat::Invalid
-                                     ? depth_format
-                                     : vk::Format::eUndefined,
-        .stencilAttachmentFormat = key.stencil_format != AmdGpu::DepthBuffer::StencilFormat::Invalid
-                                       ? depth_format
-                                       : vk::Format::eUndefined,
+        .depthAttachmentFormat = depth_attachment_format,
+        .stencilAttachmentFormat = stencil_attachment_format,
     };
 
     std::array<vk::PipelineColorBlendAttachmentState, AmdGpu::NUM_COLOR_BUFFERS> attachments;

@@ -66,7 +66,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 38. [x] Join black-boot with first skipped-draw / first shader-compile failure.
 
 ## TIER 1 — Render-attachment & pipeline validity
-39. [ ] Pipeline attachment formats match BeginRendering attachments (expose GraphicsPipeline createInfo formats; the depth-format mismatch class).
+39. [x] Pipeline attachment formats match BeginRendering attachments (expose GraphicsPipeline createInfo formats; the depth-format mismatch class).
 40. [ ] Validate bound depth image aspect matches pipeline/draw expectation.
 41. [ ] Warn when a pipeline declares a depth pixel format but no depth attachment is bound (Metal setRenderPipelineState assert class).
 42. [ ] Index type (16/32-bit) matches bound index buffer element size.
