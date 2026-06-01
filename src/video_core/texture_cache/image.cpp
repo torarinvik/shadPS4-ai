@@ -225,6 +225,8 @@ public:
             ++stat_misses;
             return false;
         }
+        // Buckets are release-ordered; reuse the newest image first so persistent surfaces are
+        // more likely to get their last backing again.
         const Entry e = it->second.back();
         it->second.pop_back();
         total_bytes -= e.bytes;
@@ -334,12 +336,12 @@ private:
         }
     }
 
-    // Evict one entry from any non-empty bucket (caller holds the lock).
+    // Evict the oldest entry from any non-empty bucket (caller holds the lock).
     bool EvictOne(VmaAllocator allocator) {
         for (auto& [key, bucket] : entries) {
             if (!bucket.empty()) {
-                const Entry e = bucket.back();
-                bucket.pop_back();
+                const Entry e = bucket.front();
+                bucket.erase(bucket.begin());
                 vmaDestroyImage(allocator, e.image, e.allocation);
                 total_bytes -= e.bytes;
                 --total_count;
