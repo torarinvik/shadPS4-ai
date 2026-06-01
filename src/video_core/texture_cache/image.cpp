@@ -6,6 +6,7 @@
 #include "common/trace_control.h"
 #include "video_core/host_diagnostics.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/blit_helper.h"
@@ -479,6 +480,9 @@ void Image::Upload(std::span<const vk::BufferImageCopy> upload_copies, vk::Buffe
         .imageMemoryBarrierCount = static_cast<u32>(image_barriers.size()),
         .pImageMemoryBarriers = image_barriers.data(),
     });
+    RecordGpuCommandDiagnostic("upload_buffer_to_image dst_addr=0x%llx copies=%zu",
+                               static_cast<unsigned long long>(info.guest_address),
+                               upload_copies.size());
     cmdbuf.copyBufferToImage(buffer, GetImage(), vk::ImageLayout::eTransferDstOptimal,
                              upload_copies);
     cmdbuf.pipelineBarrier2(vk::DependencyInfo{
@@ -530,6 +534,9 @@ void Image::Download(std::span<const vk::BufferImageCopy> download_copies, vk::B
         .imageMemoryBarrierCount = static_cast<u32>(image_barriers.size()),
         .pImageMemoryBarriers = image_barriers.data(),
     });
+    RecordGpuCommandDiagnostic("download_image_to_buffer src_addr=0x%llx copies=%zu",
+                               static_cast<unsigned long long>(info.guest_address),
+                               download_copies.size());
     cmdbuf.copyImageToBuffer(GetImage(), vk::ImageLayout::eTransferSrcOptimal, buffer,
                              download_copies);
     cmdbuf.pipelineBarrier2(vk::DependencyInfo{
@@ -728,6 +735,10 @@ void Image::CopyImage(Image& src_image) {
                                         src_image.info.resources.levels,
                                         src_image.info.resources.layers, info.guest_address,
                                         info.resources.levels, info.resources.layers, regions);
+        RecordGpuCommandDiagnostic("copy_image src_addr=0x%llx dst_addr=0x%llx regions=%zu",
+                                   static_cast<unsigned long long>(src_image.info.guest_address),
+                                   static_cast<unsigned long long>(info.guest_address),
+                                   regions.size());
         cmdbuf.copyImage(src_image.GetImage(), src_image.backing->state.layout, GetImage(),
                          backing->state.layout, regions);
     }
@@ -890,6 +901,9 @@ void Image::CopyMip(Image& src_image, u32 mip, u32 slice) {
     src_image.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, {});
 
     const auto cmdbuf = scheduler->CommandBuffer();
+    RecordGpuCommandDiagnostic("copy_image src_addr=0x%llx dst_addr=0x%llx",
+                               static_cast<unsigned long long>(src_info.guest_address),
+                               static_cast<unsigned long long>(info.guest_address));
     cmdbuf.copyImage(src_image.GetImage(), src_image.backing->state.layout, GetImage(),
                      backing->state.layout, image_copy);
     Transit(vk::ImageLayout::eGeneral,

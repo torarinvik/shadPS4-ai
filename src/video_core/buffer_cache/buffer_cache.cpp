@@ -146,6 +146,10 @@ void BufferCache::DownloadBufferMemory(Buffer& buffer, VAddr device_addr, u64 si
     const auto cmdbuf = scheduler.CommandBuffer();
     VideoCore::Diag::CheckBufferCopyRegions("BufferCache.Download", buffer.SizeBytes(),
                                             download_buffer.SizeBytes(), copies);
+    Vulkan::RecordGpuCommandDiagnostic("copy_buffer_download src_addr=0x%llx size=%llu regions=%zu",
+                                       static_cast<unsigned long long>(buffer.CpuAddr()),
+                                       static_cast<unsigned long long>(buffer.SizeBytes()),
+                                       copies.size());
     cmdbuf.copyBuffer(buffer.buffer, download_buffer.Handle(), copies);
     const auto write_data = [&]() {
         auto* memory = Core::Memory::Instance();
@@ -778,6 +782,10 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, VAddr device_addr, u32 size,
             .bufferMemoryBarrierCount = 1,
             .pBufferMemoryBarriers = &pre_barrier,
         });
+        Vulkan::RecordGpuCommandDiagnostic("copy_buffer_sync dst_addr=0x%llx size=%llu regions=%zu",
+                                           static_cast<unsigned long long>(buffer.CpuAddr()),
+                                           static_cast<unsigned long long>(buffer.SizeBytes()),
+                                           copies.size());
         cmdbuf.copyBuffer(src_buffer, buffer.buffer, copies);
         cmdbuf.pipelineBarrier2(vk::DependencyInfo{
             .dependencyFlags = vk::DependencyFlagBits::eByRegion,
