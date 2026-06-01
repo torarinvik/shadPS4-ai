@@ -9,6 +9,7 @@
 #include <mutex>
 #include <thread>
 #include <queue>
+#include <string_view>
 #include <vector>
 
 #include "common/assert.h"
@@ -25,6 +26,8 @@ class VkCtxScope;
 namespace Vulkan {
 
 class Instance;
+
+void DumpSchedulerSubmitDiagnostics(const char* reason);
 
 struct RenderAttachment {
     vk::ImageView image_view;
@@ -376,7 +379,7 @@ public:
         std::array<u64, MaxSiblings> sibling_ticks{};
     };
 
-    explicit Scheduler(const Instance& instance);
+    explicit Scheduler(const Instance& instance, std::string_view name = "unnamed");
     ~Scheduler();
 
     /// Registers another scheduler as a sibling. Deferred destroys on this scheduler will
@@ -501,6 +504,8 @@ private:
 
     u64 SubmitExecution(SubmitInfo& info);
 
+    void RecordSubmitDiagnostic(u64 signal_value);
+
     void PriorityPendingOpsThread(std::stop_token stoken);
 
     /// Snapshots each sibling scheduler's last-referencing tick into the op, so its deferred
@@ -549,6 +554,8 @@ private:
     CommandPool command_pool;
     DynamicState dynamic_state;
     vk::CommandBuffer current_cmdbuf;
+    std::string_view name;
+    std::size_t current_cmdbuf_index = 0;
     // Set when the current command buffer is handed out for recording; cleared on submit. Lets a
     // cross-scheduler deferred destroy tell whether a sibling has an open recording to wait for.
     // Atomic: read cross-thread (a free deferred on one scheduler queries its siblings, which run

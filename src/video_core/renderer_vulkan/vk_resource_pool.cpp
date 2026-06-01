@@ -98,6 +98,7 @@ void CommandPool::Allocate(std::size_t begin, std::size_t end) {
 
 vk::CommandBuffer CommandPool::Commit() {
     const std::size_t index = CommitResource();
+    last_committed_index = index;
     return cmd_buffers[index];
 }
 

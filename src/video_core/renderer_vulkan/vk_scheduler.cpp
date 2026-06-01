@@ -3,18 +3,56 @@
 
 #include "common/assert.h"
 #include "common/debug.h"
+#include "common/logging/log.h"
 #include "common/thread.h"
 #include "imgui/renderer/texture_manager.h"
 #include "video_core/host_diagnostics.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+
+#include <array>
+#include <mutex>
 
 namespace Vulkan {
 
 std::mutex Scheduler::submit_mutex;
 
-Scheduler::Scheduler(const Instance& instance)
-    : instance{instance}, master_semaphore{instance}, command_pool{instance, &master_semaphore} {
+namespace {
+
+struct SchedulerSubmitSnapshot {
+    const char* name = "unknown";
+    std::size_t command_buffer_index = 0;
+    u64 submitted_tick = 0;
+    u64 current_tick_after_submit = 0;
+    u64 known_gpu_tick_after_submit = 0;
+    bool valid = false;
+};
+
+std::mutex scheduler_submit_mutex;
+std::array<SchedulerSubmitSnapshot, 8> scheduler_submit_snapshots{};
+u32 scheduler_submit_cursor = 0;
+
+} // namespace
+
+void DumpSchedulerSubmitDiagnostics(const char* reason) {
+    std::scoped_lock lock{scheduler_submit_mutex};
+    LOG_CRITICAL(Render_Vulkan, "[{}] last scheduler submissions:", reason);
+    for (const SchedulerSubmitSnapshot& snapshot : scheduler_submit_snapshots) {
+        if (!snapshot.valid) {
+            continue;
+        }
+        LOG_CRITICAL(Render_Vulkan,
+                     "  scheduler={} command_buffer_index={} submitted_tick={} "
+                     "current_tick_after_submit={} known_gpu_tick_after_submit={}",
+                     snapshot.name, snapshot.command_buffer_index, snapshot.submitted_tick,
+                     snapshot.current_tick_after_submit, snapshot.known_gpu_tick_after_submit);
+    }
+}
+
+Scheduler::Scheduler(const Instance& instance, std::string_view name_)
+    : instance{instance}, master_semaphore{instance}, command_pool{instance, &master_semaphore},
+      name{name_} {
 #if TRACY_GPU_ENABLED
     profiler_scope = reinterpret_cast<tracy::VkCtxScope*>(std::malloc(sizeof(tracy::VkCtxScope)));
 #endif
@@ -163,6 +201,7 @@ void Scheduler::AllocateWorkerCommandBuffers() {
     };
 
     current_cmdbuf = command_pool.Commit();
+    current_cmdbuf_index = command_pool.LastCommittedIndex();
     current_buffer_has_work.store(false, std::memory_order_release);
     Check(current_cmdbuf.begin(begin_info));
 
@@ -227,12 +266,32 @@ u64 Scheduler::SubmitExecution(SubmitInfo& info) {
                vk::to_string(submit_result));
 
     master_semaphore.Refresh();
+    RecordSubmitDiagnostic(signal_value);
+    RecordGpuCommandDiagnostic(
+        "scheduler_submit scheduler=%s command_buffer_index=%zu submitted_tick=%llu "
+        "known_gpu_tick=%llu",
+        name.data(), current_cmdbuf_index, static_cast<unsigned long long>(signal_value),
+        static_cast<unsigned long long>(master_semaphore.KnownGpuTick()));
     AllocateWorkerCommandBuffers();
 
     // Apply pending operations
     PopPendingOperations();
 
     return signal_value;
+}
+
+void Scheduler::RecordSubmitDiagnostic(u64 signal_value) {
+    std::scoped_lock lock{scheduler_submit_mutex};
+    SchedulerSubmitSnapshot& snapshot =
+        scheduler_submit_snapshots[scheduler_submit_cursor++ % scheduler_submit_snapshots.size()];
+    snapshot = SchedulerSubmitSnapshot{
+        .name = name.data(),
+        .command_buffer_index = current_cmdbuf_index,
+        .submitted_tick = signal_value,
+        .current_tick_after_submit = master_semaphore.CurrentTick(),
+        .known_gpu_tick_after_submit = master_semaphore.KnownGpuTick(),
+        .valid = true,
+    };
 }
 
 void Scheduler::PriorityPendingOpsThread(std::stop_token stoken) {

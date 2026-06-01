@@ -12,6 +12,7 @@
 #include "imgui/renderer/imgui_core.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
 #include "video_core/renderer_vulkan/vk_wait_diagnostics.h"
 
@@ -154,6 +155,7 @@ bool Swapchain::AcquireNextImage() {
         // terminates via UNREACHABLE() WITHOUT dumping the GPU-op ring - the most common
         // device-loss exit for UFC 3. Dump the ring first so the last N ops (incl. frees with
         // ticks) are attributable before we abort.
+        DumpSchedulerSubmitDiagnostics("swapchain_acquire_device_loss");
         DumpGpuCommandDiagnostics("swapchain_acquire_device_loss");
         UNREACHABLE();
         break;

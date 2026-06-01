@@ -58,10 +58,15 @@ public:
 
     vk::CommandBuffer Commit();
 
+    [[nodiscard]] std::size_t LastCommittedIndex() const noexcept {
+        return last_committed_index;
+    }
+
 private:
     const Instance& instance;
     vk::UniqueCommandPool cmd_pool;
     std::vector<vk::CommandBuffer> cmd_buffers;
+    std::size_t last_committed_index = 0;
 };
 
 class DescriptorHeap final {
