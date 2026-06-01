@@ -13,6 +13,7 @@
 #include "common/config.h"
 #include "common/logging/log.h"
 #include "common/logging/thread_name_formatter.h"
+#include "common/thread.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
 #ifdef _WIN32
@@ -32,6 +33,28 @@ bool g_should_append = false;
 
 static std::shared_ptr<spdlog_stdout> g_console_sink;
 static std::shared_ptr<spdlog::sinks::basic_file_sink_mt> g_shad_file_sink;
+
+static const char* InferTerminateContext(std::string_view thread_name) {
+    if (thread_name.find("Ajm") != std::string_view::npos) {
+        return "Ajm";
+    }
+    if (thread_name.find("AvPlayer") != std::string_view::npos ||
+        thread_name.find("AvVideo") != std::string_view::npos ||
+        thread_name.find("AvAudio") != std::string_view::npos ||
+        thread_name.find("AvDemuxer") != std::string_view::npos) {
+        return "AvPlayer";
+    }
+    if (thread_name.find("MoviePlayer") != std::string_view::npos ||
+        thread_name.find("MoviePlayer2") != std::string_view::npos) {
+        return "MoviePlayer";
+    }
+    if (thread_name.find("Present") != std::string_view::npos ||
+        thread_name.find("draw") != std::string_view::npos ||
+        thread_name.find("GPU") != std::string_view::npos) {
+        return "GPU";
+    }
+    return "unknown";
+}
 
 std::unordered_map<std::string_view, std::shared_ptr<spdlog::logger>> ALL_LOGGERS{
     {Class::Common, nullptr},
@@ -320,20 +343,22 @@ void Flush() {
 }
 
 void Terminate() {
+    const std::string thread_name = Common::GetCurrentThreadName();
+    const char* context = InferTerminateContext(thread_name);
     try {
         if (std::exception_ptr eptr{std::current_exception()}) {
             std::rethrow_exception(eptr);
         }
 
-        LOG_CRITICAL(Debug, "Exiting without exception");
+        LOG_CRITICAL(Debug, "Exiting without exception thread={} context={}", thread_name, context);
 
         std::quick_exit(std::to_underlying(ShadPs4ReturnCode::TERMINATE_WITHOUT_EXCEPTION));
     } catch (const std::exception& exception) {
-        LOG_CRITICAL(Debug, "Exception: {}", exception);
+        LOG_CRITICAL(Debug, "Exception thread={} context={}: {}", thread_name, context, exception);
 
         std::quick_exit(std::to_underlying(ShadPs4ReturnCode::TERMINATE_WITH_EXCEPTION));
     } catch (...) {
-        LOG_CRITICAL(Debug, "Unknown exception caught");
+        LOG_CRITICAL(Debug, "Unknown exception caught thread={} context={}", thread_name, context);
 
         std::quick_exit(std::to_underlying(ShadPs4ReturnCode::TERMINATE_WITH_UNKNOWN_EXCEPTION));
     }
