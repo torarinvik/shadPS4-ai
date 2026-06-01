@@ -291,6 +291,18 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
         const auto& col_buf = regs.color_buffers[cb];
         const u32 target_mask = regs.color_target_mask.GetMask(cb);
         if (skip_cb_binding || !col_buf || !target_mask || (key.mrt_mask & (1 << cb)) == 0) {
+            // If this cb is in the pipeline's MRT set yet gets no render target, the draw will be
+            // skipped (clear color only) — name the exact cause of the octagon/menu corruption.
+            if ((key.mrt_mask & (1 << cb)) != 0) {
+                const u64 addr = col_buf ? static_cast<u64>(col_buf.Address()) : 0;
+                VideoCore::Diag::ReportOnce(
+                    fmt::format("nort:{}", cb),
+                    fmt::format("[PrepareRenderState] cb{} is in mrt_mask {:#x} but gets no render "
+                                "target: skip_cb_binding={} col_buf_valid={} target_mask={:#x} "
+                                "addr={:#x} -> draw skipped, scene shows clear color only",
+                                cb, key.mrt_mask, skip_cb_binding, static_cast<bool>(col_buf),
+                                target_mask, addr));
+            }
             image_id = {};
             continue;
         }
