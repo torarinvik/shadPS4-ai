@@ -348,6 +348,18 @@ void Rasterizer::DumpRenderTargetSetOnSkippedDraw(const GraphicsPipeline* pipeli
 
     const auto& key = pipeline->GetGraphicsKey();
     const auto& regs = liverpool->regs;
+    const u64 signature =
+        (static_cast<u64>(key.mrt_mask) << 48) ^
+        (static_cast<u64>(state.num_color_attachments) << 40) ^
+        (static_cast<u64>(state.depth_stencil_attachment.has_depth) << 39) ^
+        (static_cast<u64>(state.depth_stencil_attachment.has_stencil) << 38) ^
+        (static_cast<u64>(state.width) << 19) ^ static_cast<u64>(state.height);
+    if (signature == last_skipped_rt_dump_signature && tick < next_skipped_rt_dump_tick) {
+        return;
+    }
+    last_skipped_rt_dump_signature = signature;
+    next_skipped_rt_dump_tick = tick + 600;
+
     std::string message = fmt::format(
         "[Draw] skipped render-target set: tick={} mrt_mask={:#x} color_control={} "
         "num_color_attachments={} has_depth={} has_stencil={} render_extent={}x{} layers={}",
@@ -420,12 +432,14 @@ void Rasterizer::RecordDrawAttachmentOutcome(bool issued) {
     }
     if (draw_ratio_tick != tick) {
         const u32 total = issued_draws_this_tick + skipped_draws_this_tick;
-        if (total >= 16 && skipped_draws_this_tick * 4 >= total * 3) {
+        if (total >= 16 && skipped_draws_this_tick * 4 >= total * 3 &&
+            draw_ratio_tick >= next_skipped_ratio_log_tick) {
             LOG_WARNING(Render_Vulkan,
                         "[Draw] high skipped-draw ratio: tick={} skipped={} issued={} total={} "
                         "ratio={}%",
                         draw_ratio_tick, skipped_draws_this_tick, issued_draws_this_tick, total,
                         (skipped_draws_this_tick * 100) / total);
+            next_skipped_ratio_log_tick = draw_ratio_tick + 600;
         }
         draw_ratio_tick = tick;
         issued_draws_this_tick = 0;
@@ -481,13 +495,22 @@ void Rasterizer::EliminateFastClear() {
     ScopeMarkerEnd();
 }
 
-static bool HasValidRenderAttachment(const RenderState& state) {
+static bool HasValidRenderAttachment(const GraphicsPipeline* pipeline, const RenderState& state) {
     for (u32 cb = 0; cb < state.num_color_attachments; ++cb) {
         if (state.color_attachments[cb].image_view) {
             return true;
         }
     }
-    return state.depth_stencil_attachment.has_depth || state.depth_stencil_attachment.has_stencil;
+    if (state.depth_stencil_attachment.has_depth || state.depth_stencil_attachment.has_stencil) {
+        return true;
+    }
+
+    // Some guest passes intentionally have no framebuffer attachments but still need the graphics
+    // pipeline to run for shader side effects. Dropping them can leave the game stuck in a clear-only
+    // render loop (UFC 3 fight intro path).
+    return pipeline->GetGraphicsKey().mrt_mask == 0 &&
+           pipeline->GetDepthAttachmentFormat() == vk::Format::eUndefined &&
+           pipeline->GetStencilAttachmentFormat() == vk::Format::eUndefined;
 }
 
 static void ValidateColorRenderTargetDesc(s32 cb, const VideoCore::TextureCache::ImageDesc& desc) {
@@ -533,7 +556,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         return;
     }
     const auto state = BeginRendering(pipeline);
-    if (!HasValidRenderAttachment(state)) {
+    if (!HasValidRenderAttachment(pipeline, state)) {
         DumpRenderTargetSetOnSkippedDraw(pipeline, state);
         RecordDrawAttachmentOutcome(false);
         u32 null_color = 0;
@@ -609,7 +632,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         return;
     }
     const auto state = BeginRendering(pipeline);
-    if (!HasValidRenderAttachment(state)) {
+    if (!HasValidRenderAttachment(pipeline, state)) {
         DumpRenderTargetSetOnSkippedDraw(pipeline, state);
         RecordDrawAttachmentOutcome(false);
         LOG_WARNING(Render_Vulkan, "Skipping indirect draw with no valid render attachments");

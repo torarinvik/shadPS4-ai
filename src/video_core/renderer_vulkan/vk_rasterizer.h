@@ -176,8 +176,11 @@ private:
     bool fault_process_pending{};
     bool attachment_feedback_loop{};
     u64 last_skipped_rt_dump_tick{};
+    u64 last_skipped_rt_dump_signature{};
+    u64 next_skipped_rt_dump_tick{};
     bool skipped_draw_capture_triggered{};
     u64 draw_ratio_tick{};
+    u64 next_skipped_ratio_log_tick{};
     u32 issued_draws_this_tick{};
     u32 skipped_draws_this_tick{};
 };

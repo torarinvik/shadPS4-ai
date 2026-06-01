@@ -610,6 +610,48 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
     }
 
     if (recreate) {
+        const bool depth_color_reinterpret =
+            cache_image.info.props.is_depth != requested_info.props.is_depth;
+        if (depth_color_reinterpret) {
+            ImageId alias_image_id{};
+            u64 smallest_alias_size = std::numeric_limits<u64>::max();
+            ForEachImageInRegion(requested_info.guest_address, requested_info.guest_size,
+                                 [&](ImageId image_id, Image& image) {
+                                     if (image_id == cache_image_id ||
+                                         image.info.guest_address != requested_info.guest_address ||
+                                         image.info.guest_size < requested_info.guest_size ||
+                                         image.info.size != requested_info.size ||
+                                         image.info.resources < requested_info.resources ||
+                                         image.info.pixel_format != requested_info.pixel_format ||
+                                         image.info.type != requested_info.type ||
+                                         image.info.props.is_depth != requested_info.props.is_depth) {
+                                         return;
+                                     }
+
+                                     if (image.info.guest_size < smallest_alias_size) {
+                                         alias_image_id = image_id;
+                                         smallest_alias_size = image.info.guest_size;
+                                     }
+                                 });
+
+            if (alias_image_id) {
+                auto& alias_image = slot_images[alias_image_id];
+                alias_image.tick_accessed_last = scheduler.CurrentTick();
+                TouchImage(alias_image);
+                VideoCore::Diag::ReportOnce(
+                    fmt::format("depth_color_reuse_alias:{:#x}:{}",
+                                requested_info.guest_address, alias_image_id.index),
+                    fmt::format("Reusing depth/color alias image: addr={:#x} old_id={} "
+                                "alias_id={} old_format={} alias_format={} guest_size={} "
+                                "requested_size={}",
+                                requested_info.guest_address, cache_image_id.index,
+                                alias_image_id.index, vk::to_string(cache_image.info.pixel_format),
+                                vk::to_string(alias_image.info.pixel_format),
+                                alias_image.info.guest_size, requested_info.guest_size));
+                return alias_image_id;
+            }
+        }
+
         auto new_info = requested_info;
         new_info.resources = std::max(requested_info.resources, cache_image.info.resources);
         VideoCore::Diag::NoteImageRecreate("ResolveDepthOverlap", new_info.guest_address,
@@ -624,8 +666,6 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
         new_image.flags &= ~ImageFlagBits::Dirty;
         // When creating a depth buffer through overlap resolution don't clear it on first use.
         new_image.info.meta_info.htile_clear_mask = 0;
-        const bool depth_color_reinterpret =
-            cache_image.info.props.is_depth != new_image.info.props.is_depth;
         if (depth_color_reinterpret) {
             const auto old_htile = cache_image.info.meta_info.htile_addr;
             const auto new_htile = new_image.info.meta_info.htile_addr;
@@ -703,8 +743,17 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
                        BindingTypeName(binding));
         }
 
-        // Free the cache image.
-        FreeImage(cache_image_id);
+        if (depth_color_reinterpret) {
+            VideoCore::Diag::ReportOnce(
+                fmt::format("depth_color_keep_alias:{:#x}", new_info.guest_address),
+                fmt::format("Keeping depth/color alias pair registered after recreate: "
+                            "addr={:#x} old_id={} new_id={} old_format={} new_format={}",
+                            new_info.guest_address, cache_image_id.index, new_image_id.index,
+                            vk::to_string(cache_image.info.pixel_format),
+                            vk::to_string(new_image.info.pixel_format)));
+        } else {
+            FreeImage(cache_image_id);
+        }
         return new_image_id;
     }
 
