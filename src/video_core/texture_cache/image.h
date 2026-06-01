@@ -69,7 +69,7 @@ struct UniqueImage {
         return *this;
     }
 
-    void Create(const vk::ImageCreateInfo& image_ci);
+    bool Create(const vk::ImageCreateInfo& image_ci);
 
     void Destroy();
 

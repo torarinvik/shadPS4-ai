@@ -348,7 +348,7 @@ void UniqueImage::Destroy() {
     }
 }
 
-void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
+bool UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     this->image_ci = image_ci;
     ASSERT(!image);
 
@@ -360,7 +360,7 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
         if (ImageReusePool::Get().Acquire(MakeImagePoolKey(image_ci), reused, reused_alloc)) {
             image = vk::Image{reused};
             allocation = reused_alloc;
-            return;
+            return true;
         }
     }
 
@@ -380,6 +380,7 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     ASSERT_MSG(result == VK_SUCCESS, "Failed allocating image with error {}",
                vk::to_string(vk::Result{result}));
     image = vk::Image{unsafe_image};
+    return false;
 }
 
 Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
@@ -463,7 +464,14 @@ Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
     backing = &backing_images.emplace_back();
     backing->num_samples = info.num_samples;
     backing->image = UniqueImage{instance->GetDevice(), instance->GetAllocator()};
-    backing->image.Create(image_ci);
+    const bool reused_from_pool = backing->image.Create(image_ci);
+    if (reused_from_pool) {
+        RecordGpuCommandDiagnostic(
+            "IMAGE_POOL acquire addr=0x%llx size=%u format=%s extent=%ux%u layers=%u samples=%u",
+            static_cast<unsigned long long>(info.guest_address), info.guest_size,
+            vk::to_string(info.pixel_format).c_str(), info.size.width, info.size.height,
+            info.resources.layers, info.num_samples);
+    }
 
     Vulkan::SetObjectName(instance->GetDevice(), GetImage(),
                           "Image {}x{}x{} {} {} {:#x}:{:#x} L:{} M:{} S:{}", info.size.width,
@@ -472,7 +480,18 @@ Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
                           info.resources.layers, info.resources.levels, info.num_samples);
 }
 
-Image::~Image() = default;
+Image::~Image() {
+    for (const BackingImage& backing : backing_images) {
+        if (backing.image.image) {
+            RecordGpuCommandDiagnostic(
+                "IMAGE_POOL release addr=0x%llx size=%u format=%s extent=%ux%u layers=%u "
+                "samples=%u",
+                static_cast<unsigned long long>(info.guest_address), info.guest_size,
+                vk::to_string(info.pixel_format).c_str(), info.size.width, info.size.height,
+                info.resources.layers, backing.num_samples);
+        }
+    }
+}
 
 ImageView& Image::FindView(const ImageViewInfo& requested_view_info, bool ensure_guest_samples) {
     if (ensure_guest_samples && backing->num_samples > 1 != info.num_samples > 1) {

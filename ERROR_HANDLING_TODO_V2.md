@@ -36,7 +36,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 12. [x] Trace WHY `cb_descs[cb].image_id` is null: instrument `PrepareRenderState` / `FindRenderTarget` for `0x280320000`/`0x281140000` to log the lookup path that returns null.
 13. [x] Warn when `FindImage`/`FindRenderTarget` returns null for a color buffer with a valid address (distinguish "no RT bound" from "RT lookup failed").
 14. [x] Validate the color buffer's ImageInfo (format/extent/tiling) is well-formed before lookup; warn on a degenerate desc that can't resolve.
-15. [ ] Check if the null RT addr was recently freed-to-pool and not re-found (pool interaction with RT lookup) — rule the pool in/out for A.
+15. [x] Check if the null RT addr was recently freed-to-pool and not re-found (pool interaction with RT lookup) — rule the pool in/out for A.
 16. [ ] Log the full render-target set (all cb formats/ids/layouts + depth) at the first skipped draw of each frame.
 17. [ ] Per-frame skipped-vs-issued draw ratio; warn when >K% skipped (scene not rendering).
 18. [ ] Detect a color attachment whose image exists but whose view creation failed (null view vs null image — different bug).
