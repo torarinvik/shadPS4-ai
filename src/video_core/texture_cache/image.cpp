@@ -246,9 +246,18 @@ public:
             return;
         }
         std::scoped_lock lk{mutex};
-        entries[key].push_back(Entry{image, allocation, bytes});
+        auto& bucket = entries[key];
+        bucket.push_back(Entry{image, allocation, bytes});
         total_bytes += bytes;
         ++total_count;
+        while (bucket.size() > max_per_key_count) {
+            const Entry e = bucket.front();
+            bucket.erase(bucket.begin());
+            vmaDestroyImage(allocator, e.image, e.allocation);
+            total_bytes -= e.bytes;
+            --total_count;
+            ++stat_evictions;
+        }
         while (total_bytes > max_bytes || total_count > max_count) {
             if (!EvictOne(allocator)) {
                 break;
@@ -293,6 +302,12 @@ private:
                 max_bytes = static_cast<u64>(mb) * 1024 * 1024;
             }
         }
+        if (const char* v = std::getenv("SHADPS4_IMAGE_REUSE_POOL_MAX_PER_KEY")) {
+            const unsigned long count = std::strtoul(v, nullptr, 10);
+            if (count > 0) {
+                max_per_key_count = static_cast<u32>(count);
+            }
+        }
     }
 
     // Evict one entry from any non-empty bucket (caller holds the lock).
@@ -314,6 +329,7 @@ private:
     bool enabled = true;
     u64 max_bytes = 512ull * 1024 * 1024; // default 512 MB of idle pooled images
     u32 max_count = 512;
+    u32 max_per_key_count = 64;
     u64 total_bytes = 0;
     u32 total_count = 0;
     u64 stat_hits = 0;

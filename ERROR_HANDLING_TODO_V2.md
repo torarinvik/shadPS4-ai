@@ -48,7 +48,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 22. [ ] Assert a pooled image is GPU-idle on release (owning tick GPU-complete).
 23. [x] Pool stats (hits/misses/evictions/live bytes) under a flag; warn on pathological miss rate or runaway bytes.
 24. [x] Never pool external/shared-memory or dedicated VideoOut backings; assert they take the destroy path.
-25. [ ] Per-key entry cap so one churning key can't evict everything useful.
+25. [x] Per-key entry cap so one churning key can't evict everything useful.
 26. [ ] Drain-on-budget-pressure before failing an allocation.
 27. [ ] Assert pool empty at shutdown (debug) before `vmaDestroyAllocator`.
 28. [ ] Prefer most-recently-released entry of a key (content stability for persistent surfaces).
