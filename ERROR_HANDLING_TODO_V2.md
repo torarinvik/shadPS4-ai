@@ -62,7 +62,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 34. [x] Catch early non-GPU-thread aborts (Ajm/AvPlayer/MoviePlayer2) with thread+context, not bare terminate.
 35. [x] Log which reuse-pool mode is active at boot (A/B clarity).
 36. [x] Hash the first presented frame so black vs non-black boots are machine-distinguishable.
-37. [ ] Warn if the first VideoOut buffer is flipped before the GPU writes it (presenting uninitialized = black).
+37. [x] Warn if the first VideoOut buffer is flipped before the GPU writes it (presenting uninitialized = black).
 38. [ ] Join black-boot with first skipped-draw / first shader-compile failure.
 
 ## TIER 1 — Render-attachment & pipeline validity

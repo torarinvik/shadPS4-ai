@@ -1313,6 +1313,25 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     Common::Trace::RegisterVideoOutRange(cpu_address, image.info.guest_size);
     const auto last_write =
         Common::Trace::GetLastVideoOutWrite(cpu_address, image.info.guest_size);
+    static std::atomic_bool first_videoout_write_checked{false};
+    const bool check_first_videoout_write =
+        !first_videoout_write_checked.exchange(true, std::memory_order_relaxed);
+    if (check_first_videoout_write && IsStrictBlackScreenWatchdogEnabled() &&
+        last_write.sequence == 0) {
+        LOG_WARNING(Render_Vulkan,
+                    "FIRST_VIDEOOUT_BUFFER_UNWRITTEN frame={} cpu_addr={:#x} image_id={} "
+                    "guest_addr={:#x} guest_size={} size={}x{} pitch={} bits={} flags={:#x} "
+                    "usage=t{}s{}rt{}dt{} layout={} black_watchdog_armed={}",
+                    frame_number, cpu_address, image_id.index, image.info.guest_address,
+                    image.info.guest_size, image.info.size.width, image.info.size.height,
+                    image.info.pitch, image.info.num_bits, static_cast<u32>(image.flags),
+                    static_cast<u32>(image.usage.texture),
+                    static_cast<u32>(image.usage.storage),
+                    static_cast<u32>(image.usage.render_target),
+                    static_cast<u32>(image.usage.depth_target),
+                    vk::to_string(image.backing->state.layout),
+                    Common::Trace::IsBlackScreenWatchdogArmed());
+    }
     const auto guest_stats =
         (black_watchdog_enabled || trace_present_luma || hash_first_frame)
             ? ComputeRawGuestLumaStats(cpu_address, image.info.size.width, image.info.size.height,
