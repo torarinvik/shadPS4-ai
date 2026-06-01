@@ -217,12 +217,14 @@ public:
         std::scoped_lock lk{mutex};
         auto it = entries.find(key);
         if (it == entries.end() || it->second.empty()) {
+            ++stat_misses;
             return false;
         }
         const Entry e = it->second.back();
         it->second.pop_back();
         total_bytes -= e.bytes;
         --total_count;
+        ++stat_hits;
         out_image = e.image;
         out_alloc = e.allocation;
         return true;
@@ -252,6 +254,12 @@ public:
     // Destroy all pooled images and disable further pooling (called before the allocator dies).
     void Drain(VmaAllocator allocator) {
         std::scoped_lock lk{mutex};
+        const u64 total_acquire = stat_hits + stat_misses;
+        const double hit_rate = total_acquire ? (100.0 * stat_hits / total_acquire) : 0.0;
+        LOG_INFO(Render_Vulkan,
+                 "ImageReusePool stats: hits={} misses={} hit_rate={:.1f}% evictions={} "
+                 "residual_entries={} residual_bytes={}",
+                 stat_hits, stat_misses, hit_rate, stat_evictions, total_count, total_bytes);
         enabled = false;
         for (auto& [key, bucket] : entries) {
             for (const Entry& e : bucket) {
@@ -291,6 +299,7 @@ private:
                 vmaDestroyImage(allocator, e.image, e.allocation);
                 total_bytes -= e.bytes;
                 --total_count;
+                ++stat_evictions;
                 return true;
             }
         }
@@ -302,6 +311,9 @@ private:
     u32 max_count = 512;
     u64 total_bytes = 0;
     u32 total_count = 0;
+    u64 stat_hits = 0;
+    u64 stat_misses = 0;
+    u64 stat_evictions = 0;
     std::unordered_map<ImagePoolKey, std::vector<Entry>, ImagePoolKeyHash> entries;
     std::mutex mutex;
 };
