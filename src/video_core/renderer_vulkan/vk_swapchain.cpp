@@ -150,6 +150,11 @@ bool Swapchain::AcquireNextImage() {
     default:
         LOG_CRITICAL(Render_Vulkan, "Swapchain acquire returned unknown result {}",
                      vk::to_string(result));
+        // A device loss (ErrorDeviceLost) surfaces here as an "unknown" result and otherwise
+        // terminates via UNREACHABLE() WITHOUT dumping the GPU-op ring - the most common
+        // device-loss exit for UFC 3. Dump the ring first so the last N ops (incl. frees with
+        // ticks) are attributable before we abort.
+        DumpGpuCommandDiagnostics("swapchain_acquire_device_loss");
         UNREACHABLE();
         break;
     }
