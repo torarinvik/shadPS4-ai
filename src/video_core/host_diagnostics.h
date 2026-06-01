@@ -255,6 +255,22 @@ inline bool CheckBufferCopy(const char* site, u64 src_size, u64 dst_size, u64 sr
     return bad;
 }
 
+// Verify a single image subresource range (e.g. for a clear) lies within the image's mip/layer set.
+inline bool CheckSubresourceRange(const char* site, u64 guest_addr, u32 image_levels,
+                                  u32 image_layers, u32 base_level, u32 level_count, u32 base_layer,
+                                  u32 layer_count) {
+    if (level_count == 0 || layer_count == 0 || base_level + level_count > image_levels ||
+        base_layer + layer_count > image_layers) {
+        ReportOnce(fmt::format("subresrange:{}", site),
+                   fmt::format("[{}] subresource range out of bounds: addr={:#x} base_level={} "
+                               "levels={}/{} base_layer={} layers={}/{}",
+                               site, guest_addr, base_level, level_count, image_levels, base_layer,
+                               layer_count, image_layers));
+        return true;
+    }
+    return false;
+}
+
 // Verify image->image copy regions' src/dst subresources lie within each image's mip/layer range.
 inline bool CheckImageCopy(const char* site, u64 src_addr, u32 src_levels, u32 src_layers,
                            u64 dst_addr, u32 dst_levels, u32 dst_layers,

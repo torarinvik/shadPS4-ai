@@ -972,6 +972,10 @@ void Image::Clear(const vk::ClearValue& clear_value, const VideoCore::Subresourc
         .baseArrayLayer = range.base.layer,
         .layerCount = range.extent.layers,
     };
+    VideoCore::Diag::CheckSubresourceRange("Image::Clear", info.guest_address,
+                                           info.resources.levels, info.resources.layers,
+                                           range.base.level, range.extent.levels, range.base.layer,
+                                           range.extent.layers);
     scheduler->EndRendering();
     Transit(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite, {});
     const auto cmdbuf = scheduler->CommandBuffer();

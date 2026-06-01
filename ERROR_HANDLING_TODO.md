@@ -34,7 +34,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 19. [~] Buffer->buffer bounds at buffer_cache copy sites (done: Copy, ExpandOverlap, Download; todo: SynchronizeBuffer - source is a raw handle without a size).
 20. [x] fillBuffer bounds (Buffer::Fill: offset+size <= buffer size; %4 already asserted).
 21. [ ] blitImage: regions within extents; filter/format compatibility.
-22. [ ] clearColorImage/clearDepthStencilImage: subresource in bounds + legal layout.
+22. [~] clearColorImage subresource range in bounds at Image::Clear (CheckSubresourceRange; todo: depth/stencil clear + layout legality).
 23. [ ] Validate bufferOffset alignment for copyBufferToImage/copyImageToBuffer (Metal per-format alignment).
 24. [ ] Validate copy aspect masks match the image's actual aspect.
 25. [ ] Detile/tile descriptor ranges <= actual buffer size.
