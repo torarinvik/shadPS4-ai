@@ -79,6 +79,10 @@ void MasterSemaphore::Wait(u64 tick) {
             }
             continue;
         }
+        LOG_ERROR(Render_Vulkan,
+                  "GPU timeline semaphore wait failed: target_tick={} known_gpu_tick={} "
+                  "current_tick={} (compare target_tick against FREE reg_tick entries in the dump)",
+                  tick, KnownGpuTick(), CurrentTick());
         LogGpuWaitFailure("master_semaphore", result);
         break;
     }

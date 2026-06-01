@@ -18,7 +18,7 @@ Status legend: `[ ]` todo, `[~]` partial, `[x]` done.
 5. [ ] Count per-frame image recreates per guest address in ResolveDepthOverlap/ExpandImage; warn when one address recreates >K/frame (churn driver).
 6. [ ] Warn on monotonically growing recreate sizes at one address (the ratchet: 8->10->12 MB at 0x279620000).
 7. [ ] SlotVector double-free guard: each slot id erased exactly once; add a generation counter validated at submit.
-8. [~] Frees now recorded into the GPU-op ring with their registration tick (DeleteImage/DeleteBuffer); dumped on device loss. (todo: also stamp the failing cmdbuf's tick into the dump header.)
+8. [x] Frees recorded into the GPU-op ring with their registration tick (DeleteImage/DeleteBuffer), dumped on device loss; the device-loss failure path now logs target_tick/known_gpu_tick/current_tick to compare against FREE reg_tick entries.
 9. [ ] Assert DeleteImage/DeleteBuffer resource is Unregistered before the deferred destroy is queued.
 10. [ ] MasterSemaphore invariants: CurrentTick >= KnownGpuTick; NextTick never returns <= KnownGpuTick.
 11. [ ] In PopPendingOperations, assert a fired op's gpu_tick < current submitted tick.
