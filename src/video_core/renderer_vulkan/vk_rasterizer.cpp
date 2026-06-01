@@ -1765,6 +1765,20 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         texture_cache.UpdateImage(image_id);
         image->SetBackingSamples(key.color_samples[cb]);
         const auto& image_view = texture_cache.FindRenderTarget(image_id, desc);
+        if (!*image_view.image_view) {
+            VideoCore::Diag::ReportOnce(
+                fmt::format("nullcolorrtview:{:#x}:{}", desc.info.guest_address, image_id.index),
+                fmt::format("[BeginRendering] color attachment {} has image but render-target view "
+                            "is null: image_id={} addr={:#x} format={} size={}x{} view_base_layer={} "
+                            "view_layers={} view_base_level={} view_levels={} layout={}",
+                            cb, image_id.index, desc.info.guest_address,
+                            vk::to_string(desc.info.pixel_format), desc.info.size.width,
+                            desc.info.size.height, desc.view_info.range.base.layer,
+                            desc.view_info.range.extent.layers, desc.view_info.range.base.level,
+                            desc.view_info.range.extent.levels,
+                            image->backing ? vk::to_string(image->backing->state.layout)
+                                           : "no_backing"));
+        }
         const auto slice = image_view.info.range.base.layer;
         const auto mip = image_view.info.range.base.level;
 
