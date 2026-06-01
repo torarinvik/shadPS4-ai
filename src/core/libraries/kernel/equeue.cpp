@@ -175,7 +175,8 @@ bool EqueueInternal::RemoveEvent(u64 id, s16 filter) {
 int EqueueInternal::WaitForEvents(OrbisKernelEvent* ev, int num, const OrbisKernelUseconds* timo) {
     if (timo != nullptr && *timo == 0) {
         // Effectively acts as a poll; only events that have already
-        // arrived at the time of this function call can be received
+        // arrived at the time of this function call can be received.
+        std::unique_lock lock{m_mutex};
         return GetTriggeredEvents(ev, num);
     }
     const auto micros = timo ? *timo : 0u;
@@ -254,18 +255,15 @@ int EqueueInternal::GetTriggeredEvents(OrbisKernelEvent* ev, int num) {
     return count;
 }
 
-bool EqueueInternal::AddSmallTimer(EqueueEvent& ev) {
-    // Retrieve inputted time, this is stored in the bintime format
-    OrbisKernelBintime* time = reinterpret_cast<OrbisKernelBintime*>(ev.event.data);
-    OrbisKernelTimespec ts;
-    ts.tv_sec = time->sec;
-    ts.tv_nsec = ((1000000000 * (time->frac >> 32)) >> 32);
-
+bool EqueueInternal::AddSmallTimer(EqueueEvent& ev, std::chrono::nanoseconds interval) {
     // Create the small timer
     SmallTimer st;
     st.event = ev.event;
+    st.event.flags &= ~OrbisKernelEvent::Flags::Add;
+    st.event.flags |= OrbisKernelEvent::Flags::Clear;
+    st.event.data = 0;
     st.added = std::chrono::steady_clock::now();
-    st.interval = std::chrono::nanoseconds(ts.tv_nsec + ts.tv_sec * 1000000000);
+    st.interval = interval;
     {
         std::scoped_lock lock{m_mutex};
         m_small_timers[st.event.ident] = std::move(st);
@@ -288,7 +286,8 @@ int EqueueInternal::WaitForSmallTimer(OrbisKernelEvent* ev, int num, u32 micros)
                 const SmallTimer& st = it->second;
 
                 if (curr_clock - st.added >= st.interval) {
-                    ev[count++] = st.event;
+                    ev[count] = st.event;
+                    ev[count++].data++;
                     it = m_small_timers.erase(it);
                 } else {
                     ++it;
@@ -495,8 +494,6 @@ s32 PS4_SYSV_ABI sceKernelAddHRTimerEvent(OrbisKernelEqueue eq, int id, OrbisKer
         return ORBIS_KERNEL_ERROR_EBADF;
     }
 
-    const auto total_ns = ts->tv_sec * 1000000000 + ts->tv_nsec;
-
     EqueueEvent event{};
     event.event.ident = id;
     event.event.filter = OrbisKernelEvent::Filter::HrTimer;
@@ -515,8 +512,10 @@ s32 PS4_SYSV_ABI sceKernelAddHRTimerEvent(OrbisKernelEqueue eq, int id, OrbisKer
     // large. Even for large delays, we truncate a small portion to complete the wait
     // using the spinlock, prioritizing precision.
     auto& equeue = kqueues[eq];
-    if (total_ns < HrTimerSpinlockThresholdNs) {
-        return equeue->AddSmallTimer(event) ? ORBIS_OK : ORBIS_KERNEL_ERROR_ENOMEM;
+    if (ts->tv_sec == 0 && ts->tv_nsec >= 0 && ts->tv_nsec < HrTimerSpinlockThresholdNs) {
+        return equeue->AddSmallTimer(event, std::chrono::nanoseconds{ts->tv_nsec})
+                   ? ORBIS_OK
+                   : ORBIS_KERNEL_ERROR_ENOMEM;
     }
 
     if (!equeue->AddEvent(event)) {

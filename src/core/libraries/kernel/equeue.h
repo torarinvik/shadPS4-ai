@@ -163,7 +163,7 @@ public:
     bool TriggerEvent(u64 ident, s16 filter, void* trigger_data);
     int GetTriggeredEvents(OrbisKernelEvent* ev, int num);
 
-    bool AddSmallTimer(EqueueEvent& event);
+    bool AddSmallTimer(EqueueEvent& event, std::chrono::nanoseconds interval);
     bool HasSmallTimer() {
         std::scoped_lock lock{m_mutex};
         return !m_small_timers.empty();
