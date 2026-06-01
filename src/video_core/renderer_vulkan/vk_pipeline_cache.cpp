@@ -417,11 +417,15 @@ bool PipelineCache::RefreshGraphicsKey() {
     const bool stencil_attachment_bound =
         regs.depth_control.stencil_enable && regs.depth_buffer.StencilValid();
     const bool ds_attachment_bound = depth_attachment_bound || stencil_attachment_bound;
+    const bool depth_format_valid =
+        regs.depth_buffer.z_info.format != AmdGpu::DepthBuffer::ZFormat::Invalid;
+    const bool stencil_format_valid =
+        regs.depth_buffer.stencil_info.format != AmdGpu::DepthBuffer::StencilFormat::Invalid;
 
-    key.z_format = (ds_attachment_bound && regs.depth_buffer.DepthValid())
+    key.z_format = (ds_attachment_bound && depth_format_valid)
                        ? regs.depth_buffer.z_info.format
                        : AmdGpu::DepthBuffer::ZFormat::Invalid;
-    key.stencil_format = (ds_attachment_bound && regs.depth_buffer.StencilValid())
+    key.stencil_format = (ds_attachment_bound && stencil_format_valid)
                              ? regs.depth_buffer.stencil_info.format
                              : AmdGpu::DepthBuffer::StencilFormat::Invalid;
     key.depth_attachment_bound = depth_attachment_bound;
