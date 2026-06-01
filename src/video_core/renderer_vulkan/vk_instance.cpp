@@ -10,6 +10,7 @@
 #include "common/types.h"
 #include "imgui/renderer/imgui_core.h"
 #include "sdl_window.h"
+#include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
@@ -179,7 +180,8 @@ Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
 
 Instance::~Instance() {
     ImGui::Core::Shutdown(GetDevice());
-    // Release any images held in the reuse pool before the allocator is destroyed.
+    // Release any pooled resources before the allocator is destroyed.
+    ::VideoCore::DrainBufferReusePool(allocator);
     ::VideoCore::DrainImageReusePool(allocator);
     vmaDestroyAllocator(allocator);
 }

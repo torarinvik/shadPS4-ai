@@ -24,6 +24,10 @@ struct VmaAllocationInfo;
 
 namespace VideoCore {
 
+/// Destroys every buffer held in the freed-buffer reuse pool and disables further pooling. Must be
+/// called before the VMA allocator is destroyed.
+void DrainBufferReusePool(VmaAllocator allocator);
+
 /// Hints and requirements for the backing memory type of a commit
 enum class MemoryUsage {
     DeviceLocal, ///< Requests device local buffer.
@@ -52,7 +56,8 @@ struct UniqueBuffer {
           allocator{std::exchange(other.allocator, VK_NULL_HANDLE)},
           allocation{std::exchange(other.allocation, VK_NULL_HANDLE)},
           buffer{std::exchange(other.buffer, VK_NULL_HANDLE)},
-          bda_addr{std::exchange(other.bda_addr, 0)} {}
+          bda_addr{std::exchange(other.bda_addr, 0)}, buffer_ci{std::move(other.buffer_ci)},
+          usage{std::exchange(other.usage, MemoryUsage::DeviceLocal)} {}
     UniqueBuffer& operator=(UniqueBuffer&& other) {
         if (this == &other) {
             return *this;
@@ -63,6 +68,8 @@ struct UniqueBuffer {
         allocator = std::exchange(other.allocator, VK_NULL_HANDLE);
         allocation = std::exchange(other.allocation, VK_NULL_HANDLE);
         bda_addr = std::exchange(other.bda_addr, 0);
+        buffer_ci = std::move(other.buffer_ci);
+        usage = std::exchange(other.usage, MemoryUsage::DeviceLocal);
         return *this;
     }
 
@@ -80,6 +87,8 @@ struct UniqueBuffer {
     VmaAllocation allocation;
     vk::Buffer buffer{};
     vk::DeviceAddress bda_addr = 0;
+    vk::BufferCreateInfo buffer_ci{};
+    MemoryUsage usage = MemoryUsage::DeviceLocal;
 };
 
 class Buffer {

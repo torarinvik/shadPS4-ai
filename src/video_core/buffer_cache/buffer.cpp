@@ -11,6 +11,11 @@
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
 #include <vk_mem_alloc.h>
 
 namespace VideoCore {
@@ -61,6 +66,177 @@ std::string_view BufferTypeName(MemoryUsage type) {
     return VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 }
 
+namespace {
+
+struct BufferPoolKey {
+    u64 size;
+    u32 usage_flags;
+    u32 sharing_mode;
+    u32 memory_usage;
+    u32 allocation_flags;
+    u32 preferred_flags;
+
+    bool operator==(const BufferPoolKey& other) const noexcept {
+        return std::memcmp(this, &other, sizeof(BufferPoolKey)) == 0;
+    }
+};
+
+struct BufferPoolKeyHash {
+    std::size_t operator()(const BufferPoolKey& key) const noexcept {
+        const auto* data = reinterpret_cast<const u8*>(&key);
+        std::size_t hash = 1469598103934665603ull;
+        for (std::size_t i = 0; i < sizeof(key); ++i) {
+            hash ^= data[i];
+            hash *= 1099511628211ull;
+        }
+        return hash;
+    }
+};
+
+VmaAllocationCreateInfo MakeBufferAllocationInfo(const vk::BufferCreateInfo& buffer_ci,
+                                                 MemoryUsage usage) {
+    const bool with_bda = bool(buffer_ci.usage & vk::BufferUsageFlagBits::eShaderDeviceAddress);
+    const VmaAllocationCreateFlags bda_flag =
+        with_bda ? VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT : 0;
+    return VmaAllocationCreateInfo{
+        .flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT | bda_flag | MemoryUsageVmaFlags(usage),
+        .usage = MemoryUsageVma(usage),
+        .requiredFlags = 0,
+        .preferredFlags = MemoryUsagePreferredVmaFlags(usage),
+        .pool = VK_NULL_HANDLE,
+        .pUserData = nullptr,
+    };
+}
+
+BufferPoolKey MakeBufferPoolKey(const vk::BufferCreateInfo& buffer_ci, MemoryUsage usage) {
+    const auto alloc_ci = MakeBufferAllocationInfo(buffer_ci, usage);
+    return BufferPoolKey{
+        .size = buffer_ci.size,
+        .usage_flags = static_cast<u32>(static_cast<VkBufferUsageFlags>(buffer_ci.usage)),
+        .sharing_mode = static_cast<u32>(buffer_ci.sharingMode),
+        .memory_usage = static_cast<u32>(alloc_ci.usage),
+        .allocation_flags = static_cast<u32>(alloc_ci.flags),
+        .preferred_flags = static_cast<u32>(alloc_ci.preferredFlags),
+    };
+}
+
+class BufferReusePool {
+public:
+    static BufferReusePool& Get() {
+        static BufferReusePool pool;
+        return pool;
+    }
+
+    bool Acquire(const BufferPoolKey& key, VkBuffer& out_buffer, VmaAllocation& out_alloc) {
+        if (!enabled) {
+            return false;
+        }
+        std::scoped_lock lock{mutex};
+        auto it = entries.find(key);
+        if (it == entries.end() || it->second.empty()) {
+            ++stat_misses;
+            return false;
+        }
+        const Entry entry = it->second.back();
+        it->second.pop_back();
+        total_bytes -= key.size;
+        --total_count;
+        ++stat_hits;
+        out_buffer = entry.buffer;
+        out_alloc = entry.allocation;
+        return true;
+    }
+
+    void Release(VmaAllocator allocator, const BufferPoolKey& key, VkBuffer buffer,
+                 VmaAllocation allocation) {
+        if (buffer == VK_NULL_HANDLE) {
+            return;
+        }
+        if (!enabled) {
+            vmaDestroyBuffer(allocator, buffer, allocation);
+            return;
+        }
+        std::scoped_lock lock{mutex};
+        entries[key].push_back(Entry{buffer, allocation});
+        total_bytes += key.size;
+        ++total_count;
+        while (total_bytes > max_bytes || total_count > max_count) {
+            if (!EvictOne(allocator)) {
+                break;
+            }
+        }
+    }
+
+    void Drain(VmaAllocator allocator) {
+        std::scoped_lock lock{mutex};
+        const u64 total_acquire = stat_hits + stat_misses;
+        const double hit_rate = total_acquire ? (100.0 * stat_hits / total_acquire) : 0.0;
+        LOG_INFO(Render_Vulkan,
+                 "BufferReusePool stats: hits={} misses={} hit_rate={:.1f}% evictions={} "
+                 "residual_entries={} residual_bytes={}",
+                 stat_hits, stat_misses, hit_rate, stat_evictions, total_count, total_bytes);
+        enabled = false;
+        for (auto& [key, bucket] : entries) {
+            for (const Entry& entry : bucket) {
+                vmaDestroyBuffer(allocator, entry.buffer, entry.allocation);
+            }
+        }
+        entries.clear();
+        total_bytes = 0;
+        total_count = 0;
+    }
+
+private:
+    struct Entry {
+        VkBuffer buffer;
+        VmaAllocation allocation;
+    };
+
+    BufferReusePool() {
+        if (const char* value = std::getenv("SHADPS4_BUFFER_REUSE_POOL")) {
+            enabled = std::strcmp(value, "0") != 0;
+        }
+        if (const char* value = std::getenv("SHADPS4_BUFFER_REUSE_POOL_MAX_MB")) {
+            const unsigned long mb = std::strtoul(value, nullptr, 10);
+            if (mb > 0) {
+                max_bytes = static_cast<u64>(mb) * 1024 * 1024;
+            }
+        }
+    }
+
+    bool EvictOne(VmaAllocator allocator) {
+        for (auto& [key, bucket] : entries) {
+            if (!bucket.empty()) {
+                const Entry entry = bucket.back();
+                bucket.pop_back();
+                vmaDestroyBuffer(allocator, entry.buffer, entry.allocation);
+                total_bytes -= key.size;
+                --total_count;
+                ++stat_evictions;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool enabled = true;
+    u64 max_bytes = 128ull * 1024 * 1024;
+    u32 max_count = 2048;
+    u64 total_bytes = 0;
+    u32 total_count = 0;
+    u64 stat_hits = 0;
+    u64 stat_misses = 0;
+    u64 stat_evictions = 0;
+    std::unordered_map<BufferPoolKey, std::vector<Entry>, BufferPoolKeyHash> entries;
+    std::mutex mutex;
+};
+
+} // namespace
+
+void DrainBufferReusePool(VmaAllocator allocator) {
+    BufferReusePool::Get().Drain(allocator);
+}
+
 UniqueBuffer::UniqueBuffer(vk::Device device_, VmaAllocator allocator_)
     : device{device_}, allocator{allocator_} {}
 
@@ -70,7 +246,8 @@ UniqueBuffer::~UniqueBuffer() {
 
 void UniqueBuffer::Destroy() {
     if (buffer) {
-        vmaDestroyBuffer(allocator, buffer, allocation);
+        BufferReusePool::Get().Release(allocator, MakeBufferPoolKey(buffer_ci, usage), buffer,
+                                       allocation);
         buffer = vk::Buffer{};
         allocation = {};
         bda_addr = 0;
@@ -79,17 +256,29 @@ void UniqueBuffer::Destroy() {
 
 void UniqueBuffer::Create(const vk::BufferCreateInfo& buffer_ci, MemoryUsage usage,
                           VmaAllocationInfo* out_alloc_info) {
+    this->buffer_ci = buffer_ci;
+    this->usage = usage;
+    ASSERT(!buffer);
+    {
+        VkBuffer reused{};
+        VmaAllocation reused_alloc{};
+        if (BufferReusePool::Get().Acquire(MakeBufferPoolKey(buffer_ci, usage), reused,
+                                           reused_alloc)) {
+            buffer = vk::Buffer{reused};
+            allocation = reused_alloc;
+            if (out_alloc_info) {
+                vmaGetAllocationInfo(allocator, allocation, out_alloc_info);
+            }
+            if (buffer_ci.usage & vk::BufferUsageFlagBits::eShaderDeviceAddress) {
+                vk::BufferDeviceAddressInfo bda_info{.buffer = buffer};
+                bda_addr = device.getBufferAddress(bda_info);
+                ASSERT_MSG(bda_addr != 0, "Failed to get buffer device address");
+            }
+            return;
+        }
+    }
     const bool with_bda = bool(buffer_ci.usage & vk::BufferUsageFlagBits::eShaderDeviceAddress);
-    const VmaAllocationCreateFlags bda_flag =
-        with_bda ? VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT : 0;
-    const VmaAllocationCreateInfo alloc_ci = {
-        .flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT | bda_flag | MemoryUsageVmaFlags(usage),
-        .usage = MemoryUsageVma(usage),
-        .requiredFlags = 0,
-        .preferredFlags = MemoryUsagePreferredVmaFlags(usage),
-        .pool = VK_NULL_HANDLE,
-        .pUserData = nullptr,
-    };
+    const VmaAllocationCreateInfo alloc_ci = MakeBufferAllocationInfo(buffer_ci, usage);
 
     const VkBufferCreateInfo buffer_ci_unsafe = static_cast<VkBufferCreateInfo>(buffer_ci);
     VkBuffer unsafe_buffer{};

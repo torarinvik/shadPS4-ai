@@ -20,7 +20,7 @@ Checks are pure unless explicitly a fix. Logging goes through the content-dedup 
 Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 
 ## TIER 0A — Residual device loss B (buffer-side churn / command buffer)
-1. [ ] Apply the reuse-pool idea to BUFFERS: recycle UniqueBuffer (VkBuffer+alloc) by exact create-info, same as images, to kill small-buffer vmaCreate/Destroy churn.
+1. [x] Apply the reuse-pool idea to BUFFERS: recycle UniqueBuffer (VkBuffer+alloc) by exact create-info, same as images, to kill small-buffer vmaCreate/Destroy churn.
 2. [x] Count + warn on per-frame buffer create/destroy churn per size-class (16 KB stream/util buffers dominate the ring); gauge whether buffer churn drives the loss.
 3. [ ] Tag each `copy_buffer_sync`/`copy_buffer_download` ring entry with the source subsystem (stream/util/uniform/GDS) so the 474/frame flood is attributable.
 4. [ ] On device loss, log WHICH command buffer index failed + map it to the scheduler (draw/present/flip) and its in-flight tick range.
