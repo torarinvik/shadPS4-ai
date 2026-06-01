@@ -459,10 +459,15 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     const auto& [buffer, base] =
         buffer_cache.ObtainBuffer(arg_address + offset, stride * max_count, false);
 
+    VideoCore::Diag::CheckBufferRange("DrawIndirect.args", buffer->SizeBytes(), base,
+                                      static_cast<u64>(stride) * max_count);
+
     VideoCore::Buffer* count_buffer{};
     u32 count_base{};
     if (count_address != 0) {
         std::tie(count_buffer, count_base) = buffer_cache.ObtainBuffer(count_address, 4, false);
+        VideoCore::Diag::CheckBufferRange("DrawIndirect.count", count_buffer->SizeBytes(),
+                                          count_base, 4);
     }
 
     pipeline->BindResources(set_writes, buffer_barriers, push_data);
