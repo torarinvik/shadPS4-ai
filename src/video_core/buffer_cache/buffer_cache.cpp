@@ -786,6 +786,9 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, VAddr device_addr, u32 size,
                                            static_cast<unsigned long long>(buffer.CpuAddr()),
                                            static_cast<unsigned long long>(buffer.SizeBytes()),
                                            copies.size());
+        // src is the staging buffer UploadCopies built, sized total_size_bytes.
+        VideoCore::Diag::CheckBufferCopyRegions("BufferCache.Sync", total_size_bytes,
+                                                buffer.SizeBytes(), copies);
         cmdbuf.copyBuffer(src_buffer, buffer.buffer, copies);
         cmdbuf.pipelineBarrier2(vk::DependencyInfo{
             .dependencyFlags = vk::DependencyFlagBits::eByRegion,
