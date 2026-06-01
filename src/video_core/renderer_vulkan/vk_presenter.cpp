@@ -185,6 +185,7 @@ static const char* ScreenshotKindName(const ScreenshotKind kind) {
 
 struct LumaStats {
     double avg_luma{};
+    double variance{};
     u8 max_luma{};
     double near_black_pct{};
     u64 near_black_pixels{};
@@ -266,6 +267,25 @@ static u64 GetTraceVideoOutInterval() {
         char* end{};
         const auto parsed = std::strtoull(value, &end, 10);
         return end != value && parsed > 0 ? parsed : 30ULL;
+    }();
+    return interval;
+}
+
+static bool IsTracePresentLumaEnabled() {
+    static const bool enabled = Common::Trace::EnvEnabled("SHADPS4_TRACE_PRESENT_LUMA");
+    return enabled;
+}
+
+static u64 GetTracePresentLumaInterval() {
+    static const u64 interval = [] {
+        const char* value = std::getenv("SHADPS4_TRACE_PRESENT_LUMA_EVERY");
+        if (value == nullptr || value[0] == '\0') {
+            return 1ULL;
+        }
+
+        char* end{};
+        const auto parsed = std::strtoull(value, &end, 10);
+        return end != value && parsed > 0 ? parsed : 1ULL;
     }();
     return interval;
 }
@@ -564,6 +584,7 @@ static LumaStats ComputeLumaStats(const std::span<const u8> rgba, const u32 widt
     }
 
     u64 luma_sum = 0;
+    u64 luma_sum_sq = 0;
     stats.pixel_count = static_cast<u64>(width) * static_cast<u64>(height);
     for (u64 i = 0; i < stats.pixel_count; ++i) {
         const size_t offset = static_cast<size_t>(i) * 4;
@@ -574,6 +595,7 @@ static LumaStats ComputeLumaStats(const std::span<const u8> rgba, const u32 widt
                                          static_cast<u32>(b) * 19) >>
                                         8);
         luma_sum += luma;
+        luma_sum_sq += static_cast<u64>(luma) * luma;
         stats.max_luma = std::max(stats.max_luma, luma);
         if (luma <= 4) {
             stats.near_black_pixels++;
@@ -583,6 +605,10 @@ static LumaStats ComputeLumaStats(const std::span<const u8> rgba, const u32 widt
     stats.nonblack_pixels = stats.pixel_count - stats.near_black_pixels;
     stats.avg_luma =
         stats.pixel_count == 0 ? 0.0 : static_cast<double>(luma_sum) / stats.pixel_count;
+    if (stats.pixel_count != 0) {
+        const double mean_sq = static_cast<double>(luma_sum_sq) / stats.pixel_count;
+        stats.variance = std::max(0.0, mean_sq - stats.avg_luma * stats.avg_luma);
+    }
     stats.near_black_pct = stats.pixel_count == 0
                                ? 0.0
                                : (100.0 * static_cast<double>(stats.near_black_pixels)) /
@@ -606,6 +632,7 @@ static LumaStats ComputeRawGuestLumaStats(const VAddr address, const u32 width, 
     stats.pixel_count = static_cast<u64>(width) * height;
 
     u64 luma_sum = 0;
+    u64 luma_sum_sq = 0;
     for (u32 y = 0; y < height; ++y) {
         const u64 row_offset = static_cast<u64>(y) * row_bytes;
         if (row_offset >= data.size()) {
@@ -624,6 +651,7 @@ static LumaStats ComputeRawGuestLumaStats(const VAddr address, const u32 width, 
                                              static_cast<u32>(b) * 19) >>
                                             8);
             luma_sum += luma;
+            luma_sum_sq += static_cast<u64>(luma) * luma;
             stats.max_luma = std::max(stats.max_luma, luma);
             if (luma <= 4) {
                 stats.near_black_pixels++;
@@ -634,6 +662,10 @@ static LumaStats ComputeRawGuestLumaStats(const VAddr address, const u32 width, 
     stats.nonblack_pixels = stats.pixel_count - stats.near_black_pixels;
     stats.avg_luma =
         stats.pixel_count == 0 ? 0.0 : static_cast<double>(luma_sum) / stats.pixel_count;
+    if (stats.pixel_count != 0) {
+        const double mean_sq = static_cast<double>(luma_sum_sq) / stats.pixel_count;
+        stats.variance = std::max(0.0, mean_sq - stats.avg_luma * stats.avg_luma);
+    }
     stats.near_black_pct = stats.pixel_count == 0
                                ? 0.0
                                : (100.0 * static_cast<double>(stats.near_black_pixels)) /
@@ -692,8 +724,9 @@ static void LogScreenshotStats(const std::filesystem::path& path, const std::spa
                                const u32 width, const u32 height) {
     const auto stats = ComputeLumaStats(rgba, width, height);
     LOG_INFO(Render_Vulkan,
-             "TRACE_SCREENSHOT path={} size={}x{} avg_luma={:.2f} max_luma={} near_black={:.2f}%",
-             path.string(), width, height, stats.avg_luma, stats.max_luma,
+             "TRACE_SCREENSHOT path={} size={}x{} avg_luma={:.2f} variance={:.2f} max_luma={} "
+             "near_black={:.2f}%",
+             path.string(), width, height, stats.avg_luma, stats.variance, stats.max_luma,
              stats.near_black_pct);
 }
 
@@ -755,8 +788,9 @@ static void ProcessBlackWatchdogReadbacks(
         const auto& ctx = readback.watchdog_context;
         LOG_INFO(Render_Vulkan,
                  "TRACE_BLACK_WATCHDOG stage={} frame={} active={} black={} consecutive={} "
-                 "size={}x{} format={} avg_luma={:.2f} max_luma={} near_black={:.2f}% "
-                 "nonblack={} guest_avg_luma={:.2f} guest_max_luma={} "
+                 "size={}x{} format={} avg_luma={:.2f} variance={:.2f} max_luma={} "
+                 "near_black={:.2f}% nonblack={} guest_avg_luma={:.2f} "
+                 "guest_variance={:.2f} guest_max_luma={} "
                  "guest_near_black={:.2f}% guest_nonblack={} last_writer={} "
                  "last_writer_seq={} last_writer_addr={:#x} last_writer_size={} "
                  "last_writer_detail0={:#x} last_writer_detail1={:#x} "
@@ -767,10 +801,11 @@ static void ProcessBlackWatchdogReadbacks(
                  ScreenshotKindName(readback.kind), ctx.frame_index,
                  watchdog->saw_nonblack_game_frame, is_black,
                  watchdog->consecutive_black[stage_index], readback.width, readback.height,
-                 vk::to_string(readback.format), stats.avg_luma, stats.max_luma,
+                 vk::to_string(readback.format), stats.avg_luma, stats.variance, stats.max_luma,
                  stats.near_black_pct, stats.nonblack_pixels, ctx.guest_stats.avg_luma,
-                 ctx.guest_stats.max_luma, ctx.guest_stats.near_black_pct,
-                 ctx.guest_stats.nonblack_pixels, ctx.last_write_op ? ctx.last_write_op : "none",
+                 ctx.guest_stats.variance, ctx.guest_stats.max_luma,
+                 ctx.guest_stats.near_black_pct, ctx.guest_stats.nonblack_pixels,
+                 ctx.last_write_op ? ctx.last_write_op : "none",
                  ctx.last_write_sequence, ctx.last_write_address, ctx.last_write_size,
                  ctx.last_write_detail0, ctx.last_write_detail1, ctx.videoout_addr, ctx.image_id,
                  ctx.guest_size, ctx.flags, ctx.usage_texture, ctx.usage_storage,
@@ -788,22 +823,24 @@ static void ProcessBlackWatchdogReadbacks(
             LOG_WARNING(Render_Vulkan,
                         "TRACE_BLACK_WATCHDOG persistent_black_no_writer stage={} frame={} "
                         "consecutive={} threshold={} videoout_addr={:#x} image_id={} "
-                        "usage=t{}s{}rt{}dt{} layout={} avg_luma={:.2f} max_luma={} "
+                        "usage=t{}s{}rt{}dt{} layout={} avg_luma={:.2f} variance={:.2f} max_luma={} "
                         "near_black={:.2f}% nonblack={}",
                         ScreenshotKindName(readback.kind), ctx.frame_index,
                         watchdog->consecutive_black[stage_index],
                         watchdog->config.consecutive_frames, ctx.videoout_addr, ctx.image_id,
                         ctx.usage_texture, ctx.usage_storage, ctx.usage_render_target,
                         ctx.usage_depth_target, vk::to_string(ctx.layout), stats.avg_luma,
-                        stats.max_luma, stats.near_black_pct, stats.nonblack_pixels);
+                        stats.variance, stats.max_luma, stats.near_black_pct,
+                        stats.nonblack_pixels);
         }
 
         ASSERT_MSG(!persistent_unexpected_black ||
                        (!has_writer_breadcrumb && !abort_without_writer),
                    "Strict black-screen watchdog: persistent unexpected black at stage={} "
                    "frame={} consecutive={} threshold={} size={}x{} format={} avg_luma={:.2f} "
-                   "max_luma={} near_black={:.2f}% nonblack={} guest_avg_luma={:.2f} "
-                   "guest_max_luma={} guest_near_black={:.2f}% guest_nonblack={} "
+                   "variance={:.2f} max_luma={} near_black={:.2f}% nonblack={} "
+                   "guest_avg_luma={:.2f} guest_variance={:.2f} guest_max_luma={} "
+                   "guest_near_black={:.2f}% guest_nonblack={} "
                    "last_writer={} last_writer_seq={} last_writer_addr={:#x} "
                    "last_writer_size={} last_writer_detail0={:#x} last_writer_detail1={:#x} "
                    "videoout_addr={:#x} image_id={} "
@@ -813,10 +850,11 @@ static void ProcessBlackWatchdogReadbacks(
                    ScreenshotKindName(readback.kind), ctx.frame_index,
                    watchdog->consecutive_black[stage_index],
                    watchdog->config.consecutive_frames, readback.width, readback.height,
-                   vk::to_string(readback.format), stats.avg_luma, stats.max_luma,
-                   stats.near_black_pct, stats.nonblack_pixels, ctx.guest_stats.avg_luma,
-                   ctx.guest_stats.max_luma, ctx.guest_stats.near_black_pct,
-                   ctx.guest_stats.nonblack_pixels, ctx.last_write_op ? ctx.last_write_op : "none",
+                   vk::to_string(readback.format), stats.avg_luma, stats.variance,
+                   stats.max_luma, stats.near_black_pct, stats.nonblack_pixels,
+                   ctx.guest_stats.avg_luma, ctx.guest_stats.variance, ctx.guest_stats.max_luma,
+                   ctx.guest_stats.near_black_pct, ctx.guest_stats.nonblack_pixels,
+                   ctx.last_write_op ? ctx.last_write_op : "none",
                    ctx.last_write_sequence, ctx.last_write_address, ctx.last_write_size,
                    ctx.last_write_detail0, ctx.last_write_detail1, ctx.videoout_addr,
                    ctx.image_id, ctx.guest_size, ctx.flags, ctx.usage_texture, ctx.usage_storage,
@@ -1245,15 +1283,37 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
         black_frame_watchdog != nullptr && IsStrictBlackScreenWatchdogEnabled() &&
         Common::Trace::IsBlackScreenWatchdogArmed() &&
         !Libraries::SystemService::IsSplashVisible();
+    const bool trace_present_luma =
+        IsTracePresentLumaEnabled() &&
+        frame_number % GetTracePresentLumaInterval() == 0;
     Common::Trace::RegisterVideoOutRange(cpu_address, image.info.guest_size);
     const auto last_write =
         Common::Trace::GetLastVideoOutWrite(cpu_address, image.info.guest_size);
     const auto guest_stats =
-        black_watchdog_enabled
+        (black_watchdog_enabled || trace_present_luma)
             ? ComputeRawGuestLumaStats(cpu_address, image.info.size.width, image.info.size.height,
                                        image.info.pitch, image.info.num_bits,
                                        image.info.guest_size)
             : LumaStats{};
+    if (trace_present_luma) {
+        const bool blank = guest_stats.pixel_count != 0 && guest_stats.near_black_pct >= 99.5 &&
+                           guest_stats.max_luma <= 8 && guest_stats.avg_luma <= 2.0;
+        LOG_INFO(Render_Vulkan,
+                 "TRACE_PRESENT_LUMA frame={} class={} cpu_addr={:#x} image_id={} size={}x{} "
+                 "guest_size={} avg_luma={:.2f} variance={:.2f} max_luma={} "
+                 "near_black={:.2f}% nonblack={} last_writer={} last_writer_seq={} "
+                 "last_writer_addr={:#x} last_writer_size={} usage=t{}s{}rt{}dt{} layout={}",
+                 frame_number, blank ? "blank" : "drawn", cpu_address, image_id.index,
+                 image.info.size.width, image.info.size.height, image.info.guest_size,
+                 guest_stats.avg_luma, guest_stats.variance, guest_stats.max_luma,
+                 guest_stats.near_black_pct, guest_stats.nonblack_pixels,
+                 last_write.op ? last_write.op : "none", last_write.sequence, last_write.address,
+                 last_write.size, static_cast<u32>(image.usage.texture),
+                 static_cast<u32>(image.usage.storage),
+                 static_cast<u32>(image.usage.render_target),
+                 static_cast<u32>(image.usage.depth_target),
+                 vk::to_string(image.backing->state.layout));
+    }
     const WatchdogReadbackContext watchdog_context{
         .frame_index = frame_number,
         .videoout_addr = cpu_address,
