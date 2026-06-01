@@ -31,6 +31,16 @@ namespace VideoCore {
 
 static constexpr u64 NumFramesBeforeRemoval = 32;
 
+static u64 ImageFreeExtraSubmits() {
+    static const u64 extra_submits = [] {
+        if (const char* value = std::getenv("SHADPS4_IMAGE_FREE_EXTRA_SUBMITS")) {
+            return std::strtoull(value, nullptr, 10);
+        }
+        return 2ull;
+    }();
+    return extra_submits;
+}
+
 static bool IsStrictRenderValidationEnabled() {
     static const bool enabled = Common::Trace::EnvEnabled("SHADPS4_STRICT_RENDER_VALIDATION");
     return enabled;
@@ -1617,15 +1627,26 @@ void TextureCache::DeleteImage(ImageId image_id) {
     const VAddr trace_addr = image.info.guest_address;
     const u64 trace_size = image.info.guest_size;
     const u64 reg_tick = scheduler.CurrentTick();
-    scheduler.DeferOperationAfterSubmit([this, image_id, trace_addr, trace_size, reg_tick] {
+    const u64 extra_submits = ImageFreeExtraSubmits();
+    if (extra_submits > 1) {
+        VideoCore::Diag::ReportOnce(
+            "image_free_extra_submits",
+            fmt::format("SHADPS4_IMAGE_FREE_EXTRA_SUBMITS={} active: image pool releases are "
+                        "quarantined for extra submitted ticks",
+                        extra_submits));
+    }
+    scheduler.DeferOperationAfterSubmit([this, image_id, trace_addr, trace_size, reg_tick,
+                                         extra_submits] {
         if (VideoCore::Diag::TraceFrees()) {
-            LOG_INFO(Render_Vulkan, "FREE image addr={:#x} size={}", trace_addr, trace_size);
+            LOG_INFO(Render_Vulkan, "FREE image addr={:#x} size={} extra_submits={}", trace_addr,
+                     trace_size, extra_submits);
         }
         Vulkan::RecordGpuCommandDiagnostic(
-            "FREE image addr=0x%llx size=%llu reg_tick=%llu",
+            "FREE image addr=0x%llx size=%llu reg_tick=%llu extra_submits=%llu",
             static_cast<unsigned long long>(trace_addr),
             static_cast<unsigned long long>(trace_size),
-            static_cast<unsigned long long>(reg_tick));
+            static_cast<unsigned long long>(reg_tick),
+            static_cast<unsigned long long>(extra_submits));
         Image& image = slot_images[image_id];
         for (auto& backing : image.backing_images) {
             for (const ImageViewId image_view_id : backing.image_view_ids) {
@@ -1633,7 +1654,7 @@ void TextureCache::DeleteImage(ImageId image_id) {
             }
         }
         slot_images.erase(image_id);
-    });
+    }, extra_submits);
 }
 
 } // namespace VideoCore
