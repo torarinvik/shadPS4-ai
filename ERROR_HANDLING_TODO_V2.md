@@ -90,7 +90,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 
 ## TIER 2 — Image/buffer state, layout & format
 58. [ ] Central Image::ValidateState() (layout != Undefined when sampled/attached, backing non-null) at bind.
-59. [x] Validate layout transitions legal (source matches tracked actual layout).
+59. [ ] Validate layout transitions legal (source matches tracked actual layout).
 60. [ ] Format-substitution guard: host != guest -> usage compatible (D16->D32 class).
 61. [ ] Depth/stencil plane-size correctness for copies (assert at source too).
 62. [ ] Image extent <= maxImageDimension2D/3D at creation.
@@ -102,7 +102,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 68. [ ] num_samples supported for format+usage (assert chosen sample count).
 
 ## TIER 3 — Texture-cache & aliasing invariants
-69. [ ] Warn when >K images registered at one guest address simultaneously.
+69. [x] Warn when >K images registered at one guest address simultaneously (aliasing-storm gauge at RegisterImage, >=16).
 70. [ ] Assert ResolveDepthOverlap recreate frees/pools exactly one old per new.
 71. [x] "Unimplemented depth overlap copy" routed through ReportOnce+dedup (done; keep as gauge).
 72. [ ] "Resolved to too-few-resources" path -> always-warn.
