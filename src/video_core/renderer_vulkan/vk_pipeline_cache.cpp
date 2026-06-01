@@ -409,14 +409,15 @@ bool PipelineCache::RefreshGraphicsKey() {
     // MTLPixelFormatInvalid, as no texture is set") and faults the command buffer with
     // kIOGPUCommandBufferCallbackErrorInvalidResource (device loss). Gate the formats on the same
     // condition the rasterizer uses to bind the attachment so the two never disagree.
-    const bool ds_attachment_bound =
-        (regs.depth_control.depth_enable && regs.depth_buffer.DepthValid()) ||
-        (regs.depth_control.stencil_enable && regs.depth_buffer.StencilValid());
+    const bool depth_attachment_bound =
+        regs.depth_control.depth_enable && regs.depth_buffer.DepthValid();
+    const bool stencil_attachment_bound =
+        regs.depth_control.stencil_enable && regs.depth_buffer.StencilValid();
 
-    key.z_format = (ds_attachment_bound && regs.depth_buffer.DepthValid())
+    key.z_format = depth_attachment_bound
                        ? regs.depth_buffer.z_info.format
                        : AmdGpu::DepthBuffer::ZFormat::Invalid;
-    key.stencil_format = (ds_attachment_bound && regs.depth_buffer.StencilValid())
+    key.stencil_format = stencil_attachment_bound
                              ? regs.depth_buffer.stencil_info.format
                              : AmdGpu::DepthBuffer::StencilFormat::Invalid;
     key.depth_clamp_enable = !regs.depth_render_override.disable_viewport_clamp;
