@@ -41,7 +41,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 17. [x] Per-frame skipped-vs-issued draw ratio; warn when >K% skipped (scene not rendering).
 18. [x] Detect a color attachment whose image exists but whose view creation failed (null view vs null image — different bug).
 19. [x] Verify htile/meta state after a depth↔color recreate (stale htile → wrong depth → skipped geometry).
-20. [ ] Env-gated one-shot Metal frame capture on first skipped-draw to grab the corrupt frame offline.
+20. [x] Env-gated one-shot capture request on first skipped-draw to grab the corrupt frame offline.
 
 ## TIER 0C — Image reuse pool correctness & safety (new code)
 21. [ ] Env-gated clear/zero of a recycled image on acquire to test stale-content as a cause of A / black-boot.

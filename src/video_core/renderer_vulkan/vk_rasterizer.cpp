@@ -8,6 +8,7 @@
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/host_diagnostics.h"
+#include "video_core/renderdoc.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -105,6 +106,11 @@ static bool IsForceVideoOutSourceColorsEnabled() {
         const char* value = std::getenv("SHADPS4_FORCE_VIDEOOUT_SOURCE_COLORS");
         return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
     }();
+    return enabled;
+}
+
+static bool IsCaptureOnSkippedDrawEnabled() {
+    static const bool enabled = Common::Trace::EnvEnabled("SHADPS4_CAPTURE_ON_SKIPPED_DRAW");
     return enabled;
 }
 
@@ -389,6 +395,18 @@ void Rasterizer::DumpRenderTargetSetOnSkippedDraw(const GraphicsPipeline* pipeli
         depth_desc.info.size.width, depth_desc.info.size.height, depth_layout, depth_flags);
 
     LOG_WARNING(Render_Vulkan, "{}", message);
+
+    if (IsCaptureOnSkippedDrawEnabled() && !skipped_draw_capture_triggered) {
+        skipped_draw_capture_triggered = true;
+        VideoCore::RequestScreenshot(VideoCore::ScreenshotRequest::WithOverlays);
+        if (VideoCore::IsRenderDocLoaded()) {
+            VideoCore::TriggerCapture();
+            LOG_WARNING(Render_Vulkan, "Requested RenderDoc capture on first skipped draw");
+        } else {
+            LOG_WARNING(Render_Vulkan,
+                        "Requested screenshot on first skipped draw; RenderDoc is not loaded");
+        }
+    }
 }
 
 void Rasterizer::RecordDrawAttachmentOutcome(bool issued) {
