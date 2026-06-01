@@ -130,6 +130,7 @@ Buffer::Buffer(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
     Vulkan::RecordGpuCommandDiagnostic("CREATE buffer addr=0x%llx size=%llu",
                                        static_cast<unsigned long long>(cpu_addr),
                                        static_cast<unsigned long long>(size_bytes));
+    VideoCore::Diag::NoteBufferChurn(cpu_addr, size_bytes);
 
     // Map it if it is host visible.
     VkMemoryPropertyFlags property_flags{};

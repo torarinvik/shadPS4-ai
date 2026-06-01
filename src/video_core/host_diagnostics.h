@@ -122,6 +122,23 @@ inline void NoteImageRecreate(const char* site, u64 guest_addr, u64 new_size) {
     }
 }
 
+// Track buffer creations per guest address to surface buffer create/destroy churn, the suspected
+// driver of the residual device loss after the image churn was fixed (heavy small-buffer traffic in
+// the loss-dump ring). Warns once when an address is (re)created past a threshold within the run.
+inline void NoteBufferChurn(u64 guest_addr, u64 size) {
+    static std::mutex mutex;
+    static std::unordered_map<u64, u32> recs;
+    std::scoped_lock lk(mutex);
+    const u32 count = ++recs[guest_addr];
+    if (count == 256) {
+        ReportOnce(
+            fmt::format("buffer_churn:{:#x}", guest_addr),
+            fmt::format("buffer at {:#x} (size {}) created {}+ times this run (create/destroy "
+                        "churn - candidate driver of the residual device loss)",
+                        guest_addr, size, count));
+    }
+}
+
 // When SHADPS4_TRACE_FREES=1, GPU-resource destructions are logged at the moment they actually run
 // (the deferred-destroy callback firing -> vmaDestroy). Used to correlate a freed resource with a
 // subsequent kIOGPU "Invalid Resource" device loss: the last resource freed before the loss, on the
