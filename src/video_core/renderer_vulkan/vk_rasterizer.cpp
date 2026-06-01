@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #ifdef MemoryBarrier
 #undef MemoryBarrier
@@ -331,6 +332,65 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
     }
 }
 
+void Rasterizer::DumpRenderTargetSetOnSkippedDraw(const GraphicsPipeline* pipeline,
+                                                  const RenderState& state) {
+    const u64 tick = scheduler.CurrentTick();
+    if (last_skipped_rt_dump_tick == tick) {
+        return;
+    }
+    last_skipped_rt_dump_tick = tick;
+
+    const auto& key = pipeline->GetGraphicsKey();
+    const auto& regs = liverpool->regs;
+    std::string message = fmt::format(
+        "[Draw] skipped render-target set: tick={} mrt_mask={:#x} color_control={} "
+        "num_color_attachments={} has_depth={} has_stencil={} render_extent={}x{} layers={}",
+        tick, key.mrt_mask, static_cast<u32>(regs.color_control.mode),
+        state.num_color_attachments, static_cast<bool>(state.depth_stencil_attachment.has_depth),
+        static_cast<bool>(state.depth_stencil_attachment.has_stencil), state.width, state.height,
+        state.num_layers);
+
+    for (u32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS; ++cb) {
+        const auto& col_buf = regs.color_buffers[cb];
+        const auto& [image_id, desc] = cb_descs[cb];
+        const bool in_mrt = (key.mrt_mask & (1u << cb)) != 0;
+        const bool has_view =
+            cb < state.num_color_attachments && static_cast<bool>(state.color_attachments[cb].image_view);
+        std::string layout = "none";
+        u32 flags = 0;
+        if (image_id) {
+            const auto& image = texture_cache.GetImage(image_id);
+            layout = image.backing ? vk::to_string(image.backing->state.layout) : "no_backing";
+            flags = static_cast<u32>(image.flags);
+        }
+        message += fmt::format(
+            " | cb{} in_mrt={} target_mask={:#x} reg_valid={} reg_addr={:#x} image_id={} "
+            "view={} desc_addr={:#x} format={} size={}x{} pitch={} layout={} flags={:#x}",
+            cb, in_mrt, regs.color_target_mask.GetMask(cb), static_cast<bool>(col_buf),
+            col_buf ? static_cast<u64>(col_buf.Address()) : 0, image_id.index, has_view,
+            desc.info.guest_address, vk::to_string(desc.info.pixel_format), desc.info.size.width,
+            desc.info.size.height, desc.info.pitch, layout, flags);
+    }
+
+    const auto& [depth_image_id, depth_desc] = db_desc;
+    std::string depth_layout = "none";
+    u32 depth_flags = 0;
+    if (depth_image_id) {
+        const auto& image = texture_cache.GetImage(depth_image_id);
+        depth_layout = image.backing ? vk::to_string(image.backing->state.layout) : "no_backing";
+        depth_flags = static_cast<u32>(image.flags);
+    }
+    message += fmt::format(
+        " | depth image_id={} depth_valid={} stencil_valid={} depth_addr={:#x} stencil_addr={:#x} "
+        "desc_addr={:#x} format={} size={}x{} layout={} flags={:#x}",
+        depth_image_id.index, regs.depth_buffer.DepthValid(), regs.depth_buffer.StencilValid(),
+        regs.depth_buffer.DepthAddress(), regs.depth_buffer.StencilAddress(),
+        depth_desc.info.guest_address, vk::to_string(depth_desc.info.pixel_format),
+        depth_desc.info.size.width, depth_desc.info.size.height, depth_layout, depth_flags);
+
+    LOG_WARNING(Render_Vulkan, "{}", message);
+}
+
 static std::pair<u32, u32> GetDrawOffsets(
     const AmdGpu::Regs& regs, const Shader::Info& info,
     const std::optional<Shader::Gcn::FetchShaderData>& fetch_shader) {
@@ -426,6 +486,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     }
     const auto state = BeginRendering(pipeline);
     if (!HasValidRenderAttachment(state)) {
+        DumpRenderTargetSetOnSkippedDraw(pipeline, state);
         u32 null_color = 0;
         for (u32 cb = 0; cb < state.num_color_attachments; ++cb) {
             if (!state.color_attachments[cb].image_view) {
@@ -499,6 +560,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     }
     const auto state = BeginRendering(pipeline);
     if (!HasValidRenderAttachment(state)) {
+        DumpRenderTargetSetOnSkippedDraw(pipeline, state);
         LOG_WARNING(Render_Vulkan, "Skipping indirect draw with no valid render attachments");
         return;
     }

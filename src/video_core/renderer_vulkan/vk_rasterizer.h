@@ -87,6 +87,8 @@ public:
 private:
     void PrepareRenderState(const GraphicsPipeline* pipeline);
     RenderState BeginRendering(const GraphicsPipeline* pipeline);
+    void DumpRenderTargetSetOnSkippedDraw(const GraphicsPipeline* pipeline,
+                                          const RenderState& state);
     void Resolve();
     void DepthStencilCopy(bool is_depth, bool is_stencil);
     void EliminateFastClear();
@@ -172,6 +174,7 @@ private:
     boost::container::static_vector<VideoOutSourceProbe, 8> videoout_source_probes;
     bool fault_process_pending{};
     bool attachment_feedback_loop{};
+    u64 last_skipped_rt_dump_tick{};
 };
 
 } // namespace Vulkan
