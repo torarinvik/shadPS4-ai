@@ -53,7 +53,7 @@ Legend: `[ ]` todo, `[~]` partial, `[x]` done.
 27. [x] Assert pool empty at shutdown (debug) before `vmaDestroyAllocator`.
 28. [x] Prefer most-recently-released entry of a key (content stability for persistent surfaces).
 29. [x] Poison-on-evict tripwire: evicted handle must not still be referenced.
-30. [ ] Verify reused image's full create-info matches request byte-exactly (rule out a key field omission).
+30. [x] Verify reused image's full create-info matches request byte-exactly (rule out a key field omission).
 
 ## TIER 1 — Intermittent black-on-boot / no-audio
 31. [ ] Early-boot watchdog: N s after `sceVideoOutOpen` with no non-blank flip → structured "boot stalled" dump.

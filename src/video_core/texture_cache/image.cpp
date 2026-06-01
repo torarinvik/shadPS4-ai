@@ -166,6 +166,8 @@ struct ImagePoolKey {
     u32 usage;
     u32 tiling;
     u32 samples;
+    u32 sharing_mode;
+    u32 queue_family_index_count;
     u32 mips;
     u32 layers;
     u32 width;
@@ -179,6 +181,10 @@ struct ImagePoolKey {
 };
 
 ImagePoolKey MakeImagePoolKey(const vk::ImageCreateInfo& ci) {
+    ASSERT_MSG(ci.pNext == nullptr,
+               "Image reuse key cannot safely represent a non-empty image create-info pNext chain");
+    ASSERT_MSG(ci.queueFamilyIndexCount == 0,
+               "Image reuse key cannot safely represent image queue-family indices");
     return ImagePoolKey{
         .flags = static_cast<u32>(static_cast<VkImageCreateFlags>(ci.flags)),
         .type = static_cast<u32>(ci.imageType),
@@ -186,6 +192,8 @@ ImagePoolKey MakeImagePoolKey(const vk::ImageCreateInfo& ci) {
         .usage = static_cast<u32>(static_cast<VkImageUsageFlags>(ci.usage)),
         .tiling = static_cast<u32>(ci.tiling),
         .samples = static_cast<u32>(static_cast<VkSampleCountFlags>(ci.samples)),
+        .sharing_mode = static_cast<u32>(ci.sharingMode),
+        .queue_family_index_count = ci.queueFamilyIndexCount,
         .mips = ci.mipLevels,
         .layers = ci.arrayLayers,
         .width = ci.extent.width,
