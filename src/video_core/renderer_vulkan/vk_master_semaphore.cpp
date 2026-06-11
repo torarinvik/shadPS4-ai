@@ -34,6 +34,19 @@ void MasterSemaphore::Refresh() {
     do {
         this_tick = gpu_tick.load(std::memory_order_acquire);
         auto [counter_result, cntr] = instance.GetDevice().getSemaphoreCounterValue(*semaphore);
+        if (counter_result == vk::Result::eErrorDeviceLost) {
+            // First observation of the loss in our runs lands here, not in the swapchain path;
+            // dump the GPU-op ring once so the frees/copies racing the failing command buffer
+            // are recorded. Then exit immediately: continuing to submit against a lost Metal
+            // device escalates into a system-wide GPU hang/freeze on this machine.
+            static std::once_flag dump_once;
+            std::call_once(dump_once, [] {
+                DumpGpuCommandDiagnostics("master_semaphore_device_loss");
+                LOG_CRITICAL(Render_Vulkan, "Device lost; exiting to avoid wedging the host GPU");
+                Common::Log::Flush();
+                std::_Exit(70);
+            });
+        }
         ASSERT_MSG(counter_result == vk::Result::eSuccess,
                    "Failed to get master semaphore value: {}", vk::to_string(counter_result));
         counter = cntr;

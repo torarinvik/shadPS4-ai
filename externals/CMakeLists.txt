@@ -325,6 +325,10 @@ set(ALSOFT_BACKEND_NULL ON CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(openal-soft EXCLUDE_FROM_ALL)
+if (APPLE AND TARGET OpenAL)
+    # CommandLineTools SDK headers trip openal's -Werror=undef
+    target_compile_options(OpenAL PRIVATE -Wno-error=undef)
+endif()
 endif()
 
 # cpp-httplib
