@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <chrono>
 #include <limits>
 #include "video_core/host_diagnostics.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/renderer_vulkan/vk_wait_diagnostics.h"
@@ -24,9 +26,50 @@ MasterSemaphore::MasterSemaphore(const Instance& instance_) : instance{instance_
     ASSERT_MSG(semaphore_result == vk::Result::eSuccess, "Failed to create master semaphore: {}",
                vk::to_string(semaphore_result));
     semaphore = std::move(sem);
+    watchdog = std::jthread([this](std::stop_token stop) { WatchdogLoop(stop); });
 }
 
 MasterSemaphore::~MasterSemaphore() = default;
+
+void MasterSemaphore::WatchdogLoop(std::stop_token stop) {
+    const u64 timeout_sec = [] {
+        if (const char* v = std::getenv("SHADPS4_GPU_HANG_TIMEOUT")) {
+            return static_cast<u64>(std::atoll(v));
+        }
+        return u64{10};
+    }();
+    if (timeout_sec == 0) {
+        return;
+    }
+    constexpr auto poll = std::chrono::milliseconds(500);
+    u64 last_counter = 0;
+    auto last_progress = std::chrono::steady_clock::now();
+    while (!stop.stop_requested()) {
+        std::this_thread::sleep_for(poll);
+        auto [result, counter] = instance.GetDevice().getSemaphoreCounterValue(*semaphore);
+        if (result != vk::Result::eSuccess) {
+            // Device loss is handled (and dumped) by Refresh on the GPU thread.
+            continue;
+        }
+        const u64 submitted = current_tick.load(std::memory_order_acquire) - 1;
+        const auto now = std::chrono::steady_clock::now();
+        if (counter != last_counter || counter >= submitted) {
+            last_counter = counter;
+            last_progress = now;
+            continue;
+        }
+        if (now - last_progress < std::chrono::seconds(timeout_sec)) {
+            continue;
+        }
+        DumpGpuCommandDiagnostics("gpu_progress_watchdog");
+        LOG_CRITICAL(Render_Vulkan,
+                     "GPU made no progress for {}s (counter={} submitted={}); exiting before the "
+                     "hang wedges the host GPU",
+                     timeout_sec, counter, submitted);
+        Common::Log::Flush();
+        std::_Exit(72);
+    }
+}
 
 void MasterSemaphore::Refresh() {
     u64 this_tick{};

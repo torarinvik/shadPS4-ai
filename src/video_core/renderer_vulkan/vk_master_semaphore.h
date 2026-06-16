@@ -51,6 +51,16 @@ protected:
     vk::UniqueSemaphore semaphore;    ///< Timeline semaphore.
     std::atomic<u64> gpu_tick{0};     ///< Current known GPU tick.
     std::atomic<u64> current_tick{1}; ///< Current logical tick.
+
+private:
+    // GPU-progress watchdog: on this machine a wedged Metal command buffer can hang the AGX
+    // firmware without ever reporting a device loss, escalating into a whole-macOS freeze that
+    // needs a hard reboot. The watchdog polls the timeline semaphore directly and, if ticks are
+    // pending but the counter makes no progress for SHADPS4_GPU_HANG_TIMEOUT seconds (default 10,
+    // 0 disables), dumps the op ring and hard-exits (code 72) while the hang is young enough for
+    // macOS to recover the GPU by reaping the process.
+    void WatchdogLoop(std::stop_token stop);
+    std::jthread watchdog;
 };
 
 } // namespace Vulkan
