@@ -99,6 +99,11 @@ static vk::ImageUsageFlags ImageUsageFlags(const Vulkan::Instance* instance,
                 usage |= vk::ImageUsageFlagBits::eStorage;
             }
         }
+    } else {
+        // Similarly to above, we specify storage usage. This is typically not supported by
+        // compressed formats, but may be used for uncompressed views. In order to satisfy this,
+        // we will also specify the extended usage bit (forced on at image creation).
+        usage |= vk::ImageUsageFlagBits::eStorage;
     }
 
     return usage;
@@ -1230,10 +1235,12 @@ void Image::CopyImageWithBuffer(Image& src_image, vk::Buffer buffer, u64 offset)
 void Image::CopyMip(Image& src_image, u32 mip, u32 slice) {
     const auto& src_info = src_image.info;
 
-    const auto mip_w = std::max(info.size.width >> mip, 1u);
-    const auto mip_h = std::max(info.size.height >> mip, 1u);
-    const auto mip_d = std::max(info.size.depth >> mip, 1u);
-    const auto [src_layers, dst_layers] = SanitizeCopyLayers(src_info, info, mip_d, 0, slice);
+    const auto src_block_dim = src_info.BlockDim();
+    const auto dst_block_dim = info.BlockDim();
+    const auto mip_block_w = std::max(dst_block_dim.width >> mip, 1u);
+    const auto mip_block_h = std::max(dst_block_dim.height >> mip, 1u);
+    const auto [src_layers, dst_layers] =
+        SanitizeCopyLayers(src_info, info, src_info.size.depth, 0, slice);
     if (src_layers == 0 || dst_layers == 0) {
         return;
     }
@@ -1251,8 +1258,8 @@ void Image::CopyMip(Image& src_image, u32 mip, u32 slice) {
         return;
     }
 
-    ASSERT(mip_w == src_info.size.width);
-    ASSERT(mip_h == src_info.size.height);
+    ASSERT(mip_block_w == src_block_dim.width);
+    ASSERT(mip_block_h == src_block_dim.height);
 
     const vk::ImageCopy image_copy{
         .srcSubresource{
@@ -1267,7 +1274,7 @@ void Image::CopyMip(Image& src_image, u32 mip, u32 slice) {
             .baseArrayLayer = slice,
             .layerCount = dst_layers,
         },
-        .extent = {mip_w, mip_h, mip_d},
+        .extent = {src_info.size.width, src_info.size.height, src_info.size.depth},
     };
 
     SetBackingSamples(info.num_samples);
