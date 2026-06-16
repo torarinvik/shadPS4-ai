@@ -436,3 +436,4 @@ clang-tidy-report.txt
 /infer-out
 /externals/ext-libusb
 /externals/sdl3_mixer
+/analyzer_reports
