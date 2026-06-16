@@ -1455,6 +1455,35 @@ void TextureCache::RegisterImage(ImageId image_id) {
             fmt::format("alias_storm:{:#x}", guest_addr),
             fmt::format("{}+ images overlap the guest page of {:#x} simultaneously (aliasing storm)",
                         ids->size(), guest_addr));
+        // Circuit breaker: an unbounded storm fills unified memory and wedges the whole host
+        // (hard-reboot territory, like the device-loss exit in MasterSemaphore::Refresh). Dump
+        // the overlapping images + op ring and hard-exit instead of letting macOS freeze.
+        // SHADPS4_ALIAS_STORM_LIMIT overrides the threshold; 0 disables the breaker.
+        static const u64 storm_limit = [] {
+            if (const char* v = std::getenv("SHADPS4_ALIAS_STORM_LIMIT")) {
+                return static_cast<u64>(std::atoll(v));
+            }
+            return u64{48};
+        }();
+        if (storm_limit != 0 && ids->size() >= storm_limit) {
+            LOG_CRITICAL(Render_Vulkan,
+                         "Aliasing storm breaker: {} images overlap guest page {:#x}; dumping and "
+                         "exiting to avoid wedging the host GPU/memory",
+                         ids->size(), guest_addr);
+            for (const ImageId id : *ids) {
+                const Image& overlap = slot_images[id];
+                LOG_CRITICAL(Render_Vulkan,
+                             "  storm image: addr={:#x} size={:#x} {}x{}x{} format={} usage={:#x}",
+                             overlap.info.guest_address, overlap.info.guest_size,
+                             overlap.info.size.width, overlap.info.size.height,
+                             overlap.info.size.depth,
+                             vk::to_string(overlap.info.pixel_format),
+                             static_cast<u32>(overlap.usage_flags));
+            }
+            Vulkan::DumpGpuCommandDiagnostics("alias_storm_breaker");
+            Common::Log::Flush();
+            std::_Exit(71);
+        }
     }
 }
 
