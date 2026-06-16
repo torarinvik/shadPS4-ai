@@ -41,7 +41,7 @@ struct GotoVariable : FlagTag {
 
     auto operator<=>(const GotoVariable&) const noexcept = default;
 
-    u32 index;
+    u32 index{};
 };
 
 struct ThreadBitScalar : FlagTag {
@@ -50,7 +50,7 @@ struct ThreadBitScalar : FlagTag {
 
     auto operator<=>(const ThreadBitScalar&) const noexcept = default;
 
-    IR::ScalarReg sgpr;
+    IR::ScalarReg sgpr{};
 };
 
 using Variant = std::variant<IR::ScalarReg, IR::VectorReg, GotoVariable, ThreadBitScalar,

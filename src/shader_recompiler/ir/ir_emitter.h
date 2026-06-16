@@ -21,7 +21,7 @@ public:
     explicit IREmitter(Block& block_, Block::iterator insertion_point_)
         : block{&block_}, insertion_point{insertion_point_} {}
 
-    Block* block;
+    Block* block{};
 
     [[nodiscard]] U1 Imm1(bool value) const;
     [[nodiscard]] U8 Imm8(u8 value) const;

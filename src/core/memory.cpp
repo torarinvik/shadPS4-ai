@@ -1288,7 +1288,10 @@ s32 MemoryManager::Protect(VAddr addr, u64 size, MemoryProt prot) {
             // Account for potential gaps in memory map.
             protected_bytes += vma_base.base - (addr + protected_bytes);
         }
-        auto result = ProtectBytes(addr + protected_bytes, vma_base, size - protected_bytes, prot);
+        // Pass the restricted flags computed above, not the raw guest-supplied prot, so protection
+        // bits outside flag_mask cannot be stored into the VMA or applied to host pages.
+        auto result =
+            ProtectBytes(addr + protected_bytes, vma_base, size - protected_bytes, valid_flags);
         if (result < 0) {
             // ProtectBytes returned an error, return it
             return result;
@@ -1345,7 +1348,14 @@ s32 MemoryManager::VirtualQuery(VAddr addr, s32 flags,
         info->protection = 0;
     }
 
-    strncpy(info->name, vma.name.data(), ::Libraries::Kernel::ORBIS_KERNEL_MAXIMUM_NAME_LENGTH);
+    // vma.name is an unbounded std::string (guest-supplied via sceKernelMapNamed*), but info->name
+    // is a fixed char[ORBIS_KERNEL_MAXIMUM_NAME_LENGTH]. A plain strncpy of the full length leaves
+    // the buffer non-null-terminated when the name fills it, so sceKernelVirtualQuery would hand the
+    // guest a name that reads out of bounds. Copy a bounded amount and always terminate.
+    const size_t name_len = std::min<size_t>(
+        vma.name.size(), ::Libraries::Kernel::ORBIS_KERNEL_MAXIMUM_NAME_LENGTH - 1);
+    std::memcpy(info->name, vma.name.data(), name_len);
+    info->name[name_len] = '\0';
 
     return ORBIS_OK;
 }

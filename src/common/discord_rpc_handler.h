@@ -15,9 +15,9 @@ enum class RPCStatus {
 };
 
 class RPC {
-    std::uint64_t startTimestamp;
+    std::uint64_t startTimestamp{};
     bool rpcEnabled = false;
-    RPCStatus status;
+    RPCStatus status{};
 
 public:
     void init();

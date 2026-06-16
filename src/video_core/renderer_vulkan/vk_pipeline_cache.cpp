@@ -688,14 +688,15 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
         module = CompileSPV(spv, instance.GetDevice());
     }
 
-    RegisterShaderBinary(std::move(spv), info.pgm_hash, perm_idx);
-
     const auto name = GetShaderName(info.stage, info.pgm_hash, perm_idx);
     Vulkan::SetObjectName(instance.GetDevice(), module, name);
     if (EmulatorSettings.IsShaderCollect()) {
         DebugState.CollectShader(name, info.l_stage, module, spv, code,
                                  patch ? *patch : std::span<const u32>{}, is_patched);
     }
+
+    // Register (and move out) the SPIR-V only after the collect path above has read it.
+    RegisterShaderBinary(std::move(spv), info.pgm_hash, perm_idx);
     return module;
 }
 

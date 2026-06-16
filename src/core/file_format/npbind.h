@@ -37,7 +37,7 @@ struct NPBindBody {
 
 class NPBindFile {
 private:
-    NpBindHeader m_header;
+    NpBindHeader m_header{};
     std::vector<NPBindBody> m_bodies;
     u8 m_digest[20]; // zeroed if absent
 

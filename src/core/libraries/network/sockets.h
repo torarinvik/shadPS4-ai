@@ -98,7 +98,6 @@ struct PosixSocket : public Socket {
     int sockopt_ip_ttlchk = 0;
     int sockopt_ip_maxttl = 0;
     int sockopt_tcp_mss_to_advertise = 0;
-    int socket_type;
     explicit PosixSocket(int domain, int type, int protocol)
         : Socket(domain, type, protocol), sock(socket(domain, type, protocol)) {
         socket_type = type;
@@ -152,7 +151,6 @@ struct P2PSocket : public Socket {
 
 struct UnixSocket : public Socket {
     net_socket sock;
-    int socket_type;
     explicit UnixSocket(int domain, int type, int protocol)
         : Socket(domain, type, protocol), sock(socket(domain, type, protocol)) {
         socket_type = type;

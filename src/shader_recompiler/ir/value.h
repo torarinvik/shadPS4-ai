@@ -112,8 +112,8 @@ public:
 };
 
 struct Use {
-    Inst* user;
-    u32 operand;
+    Inst* user{};
+    u32 operand{};
 
     Use() = default;
     Use(Inst* user_, u32 operand_) : user(user_), operand(operand_) {}

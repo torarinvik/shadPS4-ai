@@ -124,6 +124,6 @@ private:
     bool load_chunk_data(const Common::FS::IOFile& file, const chunk_t chunk, std::string& data);
 
 private:
-    PlaygoHeader playgoHeader;
+    PlaygoHeader playgoHeader{};
     std::mutex speed_mutex;
 };

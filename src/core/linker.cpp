@@ -484,6 +484,18 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
 void* Linker::TlsGetAddr(u64 module_index, u64 offset) {
     std::scoped_lock lk{mutex};
 
+    // module_index is guest-controlled (TlsIndex::ti_module passed to __tls_get_addr). Validate it
+    // before using it to index the DTV table (sized max_tls_index + 2) and the module list,
+    // otherwise a corrupt/out-of-range index reads and writes past those allocations and silently
+    // corrupts host memory.
+    if (module_index < 1 || module_index > max_tls_index || module_index > m_modules.size()) {
+        LOG_ERROR(Core_Linker,
+                  "Out-of-range TLS module index {} (max_tls_index = {}, modules = {})",
+                  module_index, max_tls_index, m_modules.size());
+        ASSERT_MSG(false, "Out-of-range TLS module index {}", module_index);
+        return nullptr;
+    }
+
     DtvEntry* dtv_table = GetTcbBase()->tcb_dtv;
     if (dtv_table[0].counter != dtv_generation_counter) {
         // Generation counter changed, a dynamic module was either loaded or unloaded.
