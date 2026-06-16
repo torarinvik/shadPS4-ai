@@ -437,3 +437,4 @@ clang-tidy-report.txt
 /externals/ext-libusb
 /externals/sdl3_mixer
 /analyzer_reports
+/externals/mimalloc
