@@ -1451,10 +1451,27 @@ void TextureCache::RegisterImage(ImageId image_id) {
     // depth<->color reinterpret / size-ratchet aliasing that drives churn + the render corruption).
     if (const auto* ids = page_table.find(guest_addr >> Traits::PageBits); ids != nullptr &&
         ids->size() >= 16) {
+        // Count images whose guest range TRULY overlaps the new image's range, not merely images
+        // that share the same coarse page bucket. PageBits is 1 MB, so a tightly-packed but
+        // non-overlapping streaming texture pool (e.g. ~78 distinct 13 KB BC1 tiles in one MB) all
+        // land in the same bucket and would otherwise look like a storm. A real aliasing storm is
+        // many images mapping onto the SAME bytes; that is what we must catch.
+        const VAddr new_begin = guest_addr;
+        const VAddr new_end = guest_addr + image.info.guest_size;
+        u64 true_overlaps = 0;
+        for (const ImageId id : *ids) {
+            const auto& other = slot_images[id];
+            const VAddr o_begin = other.info.guest_address;
+            const VAddr o_end = o_begin + other.info.guest_size;
+            if (o_begin < new_end && o_end > new_begin) {
+                ++true_overlaps;
+            }
+        }
         VideoCore::Diag::ReportOnce(
             fmt::format("alias_storm:{:#x}", guest_addr),
-            fmt::format("{}+ images overlap the guest page of {:#x} simultaneously (aliasing storm)",
-                        ids->size(), guest_addr));
+            fmt::format("{} images truly overlap the guest range of {:#x} ({} share its 1MB page) "
+                        "(aliasing storm)",
+                        true_overlaps, guest_addr, ids->size()));
         // Circuit breaker: an unbounded storm fills unified memory and wedges the whole host
         // (hard-reboot territory, like the device-loss exit in MasterSemaphore::Refresh). Dump
         // the overlapping images + op ring and hard-exit instead of letting macOS freeze.
@@ -1465,11 +1482,12 @@ void TextureCache::RegisterImage(ImageId image_id) {
             }
             return u64{48};
         }();
-        if (storm_limit != 0 && ids->size() >= storm_limit) {
+        if (storm_limit != 0 && true_overlaps >= storm_limit) {
             LOG_CRITICAL(Render_Vulkan,
-                         "Aliasing storm breaker: {} images overlap guest page {:#x}; dumping and "
-                         "exiting to avoid wedging the host GPU/memory",
-                         ids->size(), guest_addr);
+                         "Aliasing storm breaker: {} images truly overlap guest range {:#x} ({} "
+                         "share its 1MB page); dumping and exiting to avoid wedging the host "
+                         "GPU/memory",
+                         true_overlaps, guest_addr, ids->size());
             for (const ImageId id : *ids) {
                 const Image& overlap = slot_images[id];
                 LOG_CRITICAL(Render_Vulkan,

@@ -520,16 +520,15 @@ private:
         op.num_sibling_waits = 0;
         for (Scheduler* sibling : sibling_schedulers) {
             op.sibling_sems[op.num_sibling_waits] = sibling->GetMasterSemaphore();
-            // CurrentTick() is the sibling's open (not-yet-submitted) recording; CurrentTick()-1
-            // is its highest already-submitted tick. If the sibling is actively recording, that
-            // OPEN command buffer may reference the resource we're about to free, so we must wait
-            // for it (CurrentTick()) — it WILL be submitted. If the sibling has no open recording
-            // (e.g. the idle flip scheduler), wait only for already-submitted work (CurrentTick()-1)
-            // since its open tick may never be submitted and would otherwise leak the destroy.
-            // current_tick starts at 1, so CurrentTick()-1 never underflows and IsFree(0) is always
-            // true (an idle sibling never blocks the destroy).
-            op.sibling_ticks[op.num_sibling_waits] =
-                sibling->HasOpenRecording() ? sibling->CurrentTick() : sibling->CurrentTick() - 1;
+            // Always wait for the sibling's CurrentTick() (its open / next-to-open tick), not just
+            // its already-submitted work. CaptureSiblingWaits snapshots once at free-registration
+            // time; if we only waited for CurrentTick()-1 when HasOpenRecording()==false, a sibling
+            // that opens a NEW recording after this snapshot (HasOpenRecording flips false->true in
+            // the window between NextTick() and the next CommandBuffer() call) could reference the
+            // resource we're freeing in a tick the gate never waited for -> Metal kIOGPU "Invalid
+            // Resource" device loss (UFC 3 menu/loading). All three schedulers (draw/present/flip)
+            // always Flush() their open tick, so waiting on CurrentTick() does not leak the destroy.
+            op.sibling_ticks[op.num_sibling_waits] = sibling->CurrentTick();
             ++op.num_sibling_waits;
         }
     }
