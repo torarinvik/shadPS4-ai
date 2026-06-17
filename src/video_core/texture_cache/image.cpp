@@ -500,9 +500,29 @@ bool UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     if (result != VK_SUCCESS) {
         const u32 drained_count = ImageReusePool::Get().DrainForPressure(allocator);
         if (drained_count != 0) {
+            RecordGpuCommandDiagnostic(
+                "image_alloc_pressure_retry result=%s drained=%u format=%s extent=%ux%ux%u "
+                "mips=%u layers=%u samples=%s usage=%s flags=%s",
+                vk::to_string(vk::Result{result}).c_str(), drained_count,
+                vk::to_string(image_ci.format).c_str(), image_ci.extent.width,
+                image_ci.extent.height, image_ci.extent.depth, image_ci.mipLevels,
+                image_ci.arrayLayers, vk::to_string(image_ci.samples).c_str(),
+                vk::to_string(image_ci.usage).c_str(), vk::to_string(image_ci.flags).c_str());
             result = vmaCreateImage(allocator, &image_ci_unsafe, &alloc_info, &unsafe_image,
                                     &allocation, nullptr);
         }
+    }
+    if (result != VK_SUCCESS) {
+        RecordGpuCommandDiagnostic(
+            "image_alloc_failed result=%s format=%s type=%s extent=%ux%ux%u mips=%u layers=%u "
+            "samples=%s usage=%s flags=%s tiling=%s initial_layout=%s",
+            vk::to_string(vk::Result{result}).c_str(), vk::to_string(image_ci.format).c_str(),
+            vk::to_string(image_ci.imageType).c_str(), image_ci.extent.width,
+            image_ci.extent.height, image_ci.extent.depth, image_ci.mipLevels,
+            image_ci.arrayLayers, vk::to_string(image_ci.samples).c_str(),
+            vk::to_string(image_ci.usage).c_str(), vk::to_string(image_ci.flags).c_str(),
+            vk::to_string(image_ci.tiling).c_str(), vk::to_string(image_ci.initialLayout).c_str());
+        DumpGpuCommandDiagnostics("image_alloc_failed");
     }
     ASSERT_MSG(result == VK_SUCCESS, "Failed allocating image with error {}",
                vk::to_string(vk::Result{result}));
@@ -663,6 +683,13 @@ ImageView& Image::FindView(const ImageViewInfo& requested_view_info, bool ensure
                     info.resources.levels, info.resources.layers, view_info.range.base.level,
                     view_info.range.base.layer, view_info.range.extent.levels,
                     view_info.range.extent.layers, requested_end_level, requested_end_layer);
+        RecordGpuCommandDiagnostic(
+            "image_view_subresource_oob addr=0x%llx size=%u format=%s levels=%u layers=%u "
+            "base_level=%u req_levels=%u end_level=%u base_layer=%u req_layers=%u end_layer=%u",
+            static_cast<unsigned long long>(info.guest_address), info.guest_size,
+            vk::to_string(info.pixel_format).c_str(), info.resources.levels, info.resources.layers,
+            view_info.range.base.level, view_info.range.extent.levels, requested_end_level,
+            view_info.range.base.layer, view_info.range.extent.layers, requested_end_layer);
         ASSERT_MSG(!IsStrictRenderValidationEnabled(),
                    "Strict render validation: image view requests out-of-bounds subresources "
                    "addr={:#x} size={:#x} format={} image_levels={} image_layers={} "
@@ -943,6 +970,10 @@ static std::pair<u32, u32> SanitizeCopyLayers(const ImageInfo& src_info, const I
     // 3D images can only use 1 layer.
     if (vk_src_type == vk::ImageType::e3D && src_layers != 1) {
         LOG_WARNING(Render_Vulkan, "Coercing copy 3D source layers {} to 1.", src_layers);
+        RecordGpuCommandDiagnostic(
+            "coerce_copy_layers_3d_src src_addr=0x%llx dst_addr=0x%llx src_layers=%u dst_layers=%u",
+            static_cast<unsigned long long>(src_info.guest_address),
+            static_cast<unsigned long long>(dst_info.guest_address), src_layers, dst_layers);
         ASSERT_MSG(!ShouldAbortCopyLayerCoercion(),
                    "Strict render validation: coercing 3D source copy layers from {} to 1 "
                    "src_addr={:#x} src_size={} dst_addr={:#x} dst_size={}",
@@ -952,6 +983,10 @@ static std::pair<u32, u32> SanitizeCopyLayers(const ImageInfo& src_info, const I
     }
     if (vk_dst_type == vk::ImageType::e3D && dst_layers != 1) {
         LOG_WARNING(Render_Vulkan, "Coercing copy 3D destination layers {} to 1.", dst_layers);
+        RecordGpuCommandDiagnostic(
+            "coerce_copy_layers_3d_dst src_addr=0x%llx dst_addr=0x%llx src_layers=%u dst_layers=%u",
+            static_cast<unsigned long long>(src_info.guest_address),
+            static_cast<unsigned long long>(dst_info.guest_address), src_layers, dst_layers);
         ASSERT_MSG(!ShouldAbortCopyLayerCoercion(),
                    "Strict render validation: coercing 3D destination copy layers from {} to 1 "
                    "src_addr={:#x} src_size={} dst_addr={:#x} dst_size={}",
@@ -966,6 +1001,11 @@ static std::pair<u32, u32> SanitizeCopyLayers(const ImageInfo& src_info, const I
             LOG_WARNING(Render_Vulkan,
                         "Coercing copy source layers {} and destination layers {} to minimum.",
                         src_layers, dst_layers);
+            RecordGpuCommandDiagnostic(
+                "coerce_copy_layers_same_type src_addr=0x%llx dst_addr=0x%llx "
+                "src_layers=%u dst_layers=%u",
+                static_cast<unsigned long long>(src_info.guest_address),
+                static_cast<unsigned long long>(dst_info.guest_address), src_layers, dst_layers);
             ASSERT_MSG(!ShouldAbortCopyLayerCoercion(),
                        "Strict render validation: coercing copy layers from src={} dst={} "
                        "src_addr={:#x} src_size={} dst_addr={:#x} dst_size={}",
@@ -980,6 +1020,11 @@ static std::pair<u32, u32> SanitizeCopyLayers(const ImageInfo& src_info, const I
             LOG_WARNING(Render_Vulkan,
                         "Coercing copy 2D source layers {} to 3D destination depth {}", src_layers,
                         depth);
+            RecordGpuCommandDiagnostic(
+                "coerce_copy_layers_2d_to_3d src_addr=0x%llx dst_addr=0x%llx "
+                "src_layers=%u dst_depth=%u",
+                static_cast<unsigned long long>(src_info.guest_address),
+                static_cast<unsigned long long>(dst_info.guest_address), src_layers, depth);
             ASSERT_MSG(!ShouldAbortCopyLayerCoercion(),
                        "Strict render validation: coercing 2D source copy layers {} to 3D depth {} "
                        "src_addr={:#x} src_size={} dst_addr={:#x} dst_size={}",
@@ -992,6 +1037,11 @@ static std::pair<u32, u32> SanitizeCopyLayers(const ImageInfo& src_info, const I
             LOG_WARNING(Render_Vulkan,
                         "Coercing copy 2D destination layers {} to 3D source depth {}", dst_layers,
                         depth);
+            RecordGpuCommandDiagnostic(
+                "coerce_copy_layers_3d_to_2d src_addr=0x%llx dst_addr=0x%llx "
+                "dst_layers=%u src_depth=%u",
+                static_cast<unsigned long long>(src_info.guest_address),
+                static_cast<unsigned long long>(dst_info.guest_address), dst_layers, depth);
             ASSERT_MSG(!ShouldAbortCopyLayerCoercion(),
                        "Strict render validation: coercing 2D destination copy layers {} to 3D "
                        "depth {} src_addr={:#x} src_size={} dst_addr={:#x} dst_size={}",
@@ -1042,6 +1092,13 @@ void Image::CopyImage(Image& src_image) {
                     vk::to_string(src_info.pixel_format), src_info.num_samples,
                     vk::to_string(src_aspect), info.guest_address, info.guest_size,
                     vk::to_string(info.pixel_format), info.num_samples, vk::to_string(dst_aspect));
+        RecordGpuCommandDiagnostic(
+            "skip_incompatible_image_copy src_addr=0x%llx src_size=%u src_format=%s "
+            "src_samples=%u dst_addr=0x%llx dst_size=%u dst_format=%s dst_samples=%u",
+            static_cast<unsigned long long>(src_info.guest_address), src_info.guest_size,
+            vk::to_string(src_info.pixel_format).c_str(), src_info.num_samples,
+            static_cast<unsigned long long>(info.guest_address), info.guest_size,
+            vk::to_string(info.pixel_format).c_str(), info.num_samples);
         return;
     }
 

@@ -10,6 +10,7 @@
 #include "common/string_literal.h"
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 
 namespace Frontend {
 enum class WindowSystemType : u8;
@@ -52,6 +53,16 @@ void SetObjectName(vk::Device device, const HandleType& handle, const char* form
 
 template <StringLiteral msg = "">
 static void Check(vk::Result r) {
+    if (r != vk::Result::eSuccess) {
+        if constexpr (msg.len <= 1) {
+            RecordGpuCommandDiagnostic("vulkan_check_failed result=%s", vk::to_string(r).c_str());
+            DumpGpuCommandDiagnostics("vulkan_check_failed");
+        } else {
+            RecordGpuCommandDiagnostic("vulkan_check_failed op=%s result=%s", msg.value,
+                                       vk::to_string(r).c_str());
+            DumpGpuCommandDiagnostics(msg.value);
+        }
+    }
     if constexpr (msg.len <= 1) {
         ASSERT_MSG(r == vk::Result::eSuccess, "vk::Result={}", vk::to_string(r));
     } else {
@@ -62,6 +73,17 @@ static void Check(vk::Result r) {
 
 template <StringLiteral msg = "", typename T>
 static T Check(vk::ResultValue<T> r) {
+    if (r.result != vk::Result::eSuccess) {
+        if constexpr (msg.len <= 1) {
+            RecordGpuCommandDiagnostic("vulkan_check_value_failed result=%s",
+                                       vk::to_string(r.result).c_str());
+            DumpGpuCommandDiagnostics("vulkan_check_value_failed");
+        } else {
+            RecordGpuCommandDiagnostic("vulkan_check_value_failed op=%s result=%s", msg.value,
+                                       vk::to_string(r.result).c_str());
+            DumpGpuCommandDiagnostics(msg.value);
+        }
+    }
     if constexpr (msg.len <= 1) {
         ASSERT_MSG(r.result == vk::Result::eSuccess, "vk::Result={}", vk::to_string(r.result));
     } else {

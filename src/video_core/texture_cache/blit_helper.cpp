@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/texture_cache/blit_helper.h"
@@ -65,6 +66,14 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
     };
     const auto [color_view_result, color_view] =
         instance.GetDevice().createImageView(color_view_ci);
+    if (color_view_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "blit_color_to_ms_depth_src_view_failed result=%s src_format=%s dst_format=%s "
+            "samples=%u extent=%ux%u",
+            vk::to_string(color_view_result).c_str(), vk::to_string(src_pixel_format).c_str(),
+            vk::to_string(dst_pixel_format).c_str(), num_samples, width, height);
+        Vulkan::DumpGpuCommandDiagnostics("blit_color_to_ms_depth_src_view_failed");
+    }
     ASSERT_MSG(color_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
                vk::to_string(color_view_result));
     const vk::ImageViewUsageCreateInfo depth_usage_ci{
@@ -84,6 +93,14 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
     };
     const auto [depth_view_result, depth_view] =
         instance.GetDevice().createImageView(depth_view_ci);
+    if (depth_view_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "blit_color_to_ms_depth_dst_view_failed result=%s src_format=%s dst_format=%s "
+            "samples=%u extent=%ux%u",
+            vk::to_string(depth_view_result).c_str(), vk::to_string(src_pixel_format).c_str(),
+            vk::to_string(dst_pixel_format).c_str(), num_samples, width, height);
+        Vulkan::DumpGpuCommandDiagnostics("blit_color_to_ms_depth_dst_view_failed");
+    }
     ASSERT_MSG(depth_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
                vk::to_string(depth_view_result));
     scheduler.DeferOperation([device = instance.GetDevice(), color_view, depth_view] {
@@ -167,6 +184,14 @@ void BlitHelper::ReinterpretMsDepthAsColor(u32 width, u32 height, u32 num_sample
     };
     const auto [depth_view_result, depth_view] =
         instance.GetDevice().createImageView(depth_view_ci);
+    if (depth_view_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "blit_ms_depth_to_color_src_view_failed result=%s src_format=%s dst_format=%s "
+            "samples=%u extent=%ux%u",
+            vk::to_string(depth_view_result).c_str(), vk::to_string(src_pixel_format).c_str(),
+            vk::to_string(dst_pixel_format).c_str(), num_samples, width, height);
+        Vulkan::DumpGpuCommandDiagnostics("blit_ms_depth_to_color_src_view_failed");
+    }
     ASSERT_MSG(depth_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
                vk::to_string(depth_view_result));
 
@@ -187,6 +212,14 @@ void BlitHelper::ReinterpretMsDepthAsColor(u32 width, u32 height, u32 num_sample
     };
     const auto [color_view_result, color_view] =
         instance.GetDevice().createImageView(color_view_ci);
+    if (color_view_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "blit_ms_depth_to_color_dst_view_failed result=%s src_format=%s dst_format=%s "
+            "samples=%u extent=%ux%u",
+            vk::to_string(color_view_result).c_str(), vk::to_string(src_pixel_format).c_str(),
+            vk::to_string(dst_pixel_format).c_str(), num_samples, width, height);
+        Vulkan::DumpGpuCommandDiagnostics("blit_ms_depth_to_color_dst_view_failed");
+    }
     ASSERT_MSG(color_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
                vk::to_string(color_view_result));
     scheduler.DeferOperation([device = instance.GetDevice(), depth_view, color_view] {
@@ -269,6 +302,13 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
         },
     };
     const auto [src_view_result, src_view] = instance.GetDevice().createImageView(src_view_ci);
+    if (src_view_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "blit_ms_copy_src_view_failed result=%s format=%s samples=%u src_msaa=%u extent=%ux%u",
+            vk::to_string(src_view_result).c_str(), vk::to_string(pixel_format).c_str(),
+            num_samples, src_msaa ? 1 : 0, width, height);
+        Vulkan::DumpGpuCommandDiagnostics("blit_ms_copy_src_view_failed");
+    }
     ASSERT_MSG(src_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
                vk::to_string(src_view_result));
 
@@ -288,6 +328,13 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
         },
     };
     const auto [dst_view_result, dst_view] = instance.GetDevice().createImageView(dst_view_ci);
+    if (dst_view_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "blit_ms_copy_dst_view_failed result=%s format=%s samples=%u src_msaa=%u extent=%ux%u",
+            vk::to_string(dst_view_result).c_str(), vk::to_string(pixel_format).c_str(),
+            num_samples, src_msaa ? 1 : 0, width, height);
+        Vulkan::DumpGpuCommandDiagnostics("blit_ms_copy_dst_view_failed");
+    }
     ASSERT_MSG(dst_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
                vk::to_string(dst_view_result));
     scheduler.DeferOperation([device = instance.GetDevice(), src_view, dst_view] {
@@ -380,6 +427,14 @@ void BlitHelper::CreatePipelineLayouts() {
     };
     auto [desc_layout_result, desc_layout] =
         instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci);
+    if (desc_layout_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic("blit_descriptor_layout_failed result=%s",
+                                           vk::to_string(desc_layout_result).c_str());
+        Vulkan::DumpGpuCommandDiagnostics("blit_descriptor_layout_failed");
+    }
+    ASSERT_MSG(desc_layout_result == vk::Result::eSuccess,
+               "Failed to create graphics descriptor set layout: {}",
+               vk::to_string(desc_layout_result));
     single_texture_descriptor_set_layout = std::move(desc_layout);
     const vk::DescriptorSetLayout set_layout = *single_texture_descriptor_set_layout;
     const vk::PipelineLayoutCreateInfo layout_info = {
@@ -390,6 +445,11 @@ void BlitHelper::CreatePipelineLayouts() {
     };
     auto [layout_result, pipeline_layout] =
         instance.GetDevice().createPipelineLayoutUnique(layout_info);
+    if (layout_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic("blit_pipeline_layout_failed result=%s",
+                                           vk::to_string(layout_result).c_str());
+        Vulkan::DumpGpuCommandDiagnostics("blit_pipeline_layout_failed");
+    }
     ASSERT_MSG(layout_result == vk::Result::eSuccess,
                "Failed to create graphics pipeline layout: {}", vk::to_string(layout_result));
     Vulkan::SetObjectName(instance.GetDevice(), *pipeline_layout, "Single texture pipeline layout");
@@ -456,6 +516,13 @@ void BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
 
     auto [pipeline_result, pipeline] =
         instance.GetDevice().createGraphicsPipelineUnique(VK_NULL_HANDLE, pipeline_info);
+    if (pipeline_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "blit_color_to_ms_depth_pipeline_failed result=%s format=%s samples=%u",
+            vk::to_string(pipeline_result).c_str(), vk::to_string(key.attachment_format).c_str(),
+            key.num_samples);
+        Vulkan::DumpGpuCommandDiagnostics("blit_color_to_ms_depth_pipeline_failed");
+    }
     ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
                vk::to_string(pipeline_result));
     Vulkan::SetObjectName(instance.GetDevice(), *pipeline, "Color to MS Depth {}", key.num_samples);
@@ -532,6 +599,13 @@ void BlitHelper::CreateMsDepthToColorPipeline(const MsPipelineKey& key) {
 
     auto [pipeline_result, pipeline] =
         instance.GetDevice().createGraphicsPipelineUnique(VK_NULL_HANDLE, pipeline_info);
+    if (pipeline_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "blit_ms_depth_to_color_pipeline_failed result=%s format=%s samples=%u",
+            vk::to_string(pipeline_result).c_str(), vk::to_string(key.attachment_format).c_str(),
+            key.num_samples);
+        Vulkan::DumpGpuCommandDiagnostics("blit_ms_depth_to_color_pipeline_failed");
+    }
     ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
                vk::to_string(pipeline_result));
     Vulkan::SetObjectName(instance.GetDevice(), *pipeline, "MS Depth to Color {}", key.num_samples);
@@ -610,6 +684,13 @@ void BlitHelper::CreateMsCopyPipeline(const MsPipelineKey& key) {
 
     auto [pipeline_result, pipeline] =
         instance.GetDevice().createGraphicsPipelineUnique(VK_NULL_HANDLE, pipeline_info);
+    if (pipeline_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "blit_ms_copy_pipeline_failed result=%s format=%s samples=%u src_msaa=%u",
+            vk::to_string(pipeline_result).c_str(), vk::to_string(key.attachment_format).c_str(),
+            key.num_samples, key.src_msaa ? 1 : 0);
+        Vulkan::DumpGpuCommandDiagnostics("blit_ms_copy_pipeline_failed");
+    }
     ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
                vk::to_string(pipeline_result));
     Vulkan::SetObjectName(instance.GetDevice(), *pipeline, "Non MS Image to MS Image {}",

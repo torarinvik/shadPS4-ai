@@ -673,6 +673,22 @@ static LumaStats ComputeRawGuestLumaStats(const VAddr address, const u32 width, 
     return stats;
 }
 
+static const char* ClassifyLumaFrame(const LumaStats& stats) {
+    if (stats.pixel_count == 0) {
+        return "unknown";
+    }
+    if (stats.near_black_pct >= 99.5 && stats.max_luma <= 8 && stats.avg_luma <= 2.0) {
+        return "blank";
+    }
+    if (stats.variance <= 4.0) {
+        return "solid";
+    }
+    if (stats.variance <= 32.0) {
+        return "flat";
+    }
+    return "drawn";
+}
+
 static u64 ComputeRawGuestFrameHash(const VAddr address, const u32 width, const u32 height,
                                     const u32 pitch, const u32 bits_per_pixel,
                                     const u64 guest_size) {
@@ -1360,26 +1376,33 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
         const u64 frame_hash =
             ComputeRawGuestFrameHash(cpu_address, image.info.size.width, image.info.size.height,
                                      image.info.pitch, image.info.num_bits, image.info.guest_size);
-        const bool blank = guest_stats.pixel_count != 0 && guest_stats.near_black_pct >= 99.5 &&
-                           guest_stats.max_luma <= 8 && guest_stats.avg_luma <= 2.0;
+        const char* frame_class = ClassifyLumaFrame(guest_stats);
         LOG_INFO(Render_Vulkan,
                  "FIRST_PRESENTED_FRAME hash={:#x} class={} cpu_addr={:#x} image_id={} "
                  "size={}x{} guest_size={} avg_luma={:.2f} variance={:.2f} max_luma={} "
                  "near_black={:.2f}% nonblack={}",
-                 frame_hash, blank ? "blank" : "drawn", cpu_address, image_id.index,
+                 frame_hash, frame_class, cpu_address, image_id.index,
                  image.info.size.width, image.info.size.height, image.info.guest_size,
                  guest_stats.avg_luma, guest_stats.variance, guest_stats.max_luma,
                  guest_stats.near_black_pct, guest_stats.nonblack_pixels);
+        if (std::strcmp(frame_class, "solid") == 0 || std::strcmp(frame_class, "flat") == 0) {
+            RecordGpuCommandDiagnostic(
+                "first_presented_frame_%s hash=0x%llx addr=0x%llx image_id=%u avg_luma=%.2f "
+                "variance=%.2f max_luma=%u near_black=%.2f",
+                frame_class, static_cast<unsigned long long>(frame_hash),
+                static_cast<unsigned long long>(cpu_address), image_id.index,
+                guest_stats.avg_luma, guest_stats.variance, guest_stats.max_luma,
+                guest_stats.near_black_pct);
+        }
     }
     if (trace_present_luma) {
-        const bool blank = guest_stats.pixel_count != 0 && guest_stats.near_black_pct >= 99.5 &&
-                           guest_stats.max_luma <= 8 && guest_stats.avg_luma <= 2.0;
+        const char* frame_class = ClassifyLumaFrame(guest_stats);
         LOG_INFO(Render_Vulkan,
                  "TRACE_PRESENT_LUMA frame={} class={} cpu_addr={:#x} image_id={} size={}x{} "
                  "guest_size={} avg_luma={:.2f} variance={:.2f} max_luma={} "
                  "near_black={:.2f}% nonblack={} last_writer={} last_writer_seq={} "
                  "last_writer_addr={:#x} last_writer_size={} usage=t{}s{}rt{}dt{} layout={}",
-                 frame_number, blank ? "blank" : "drawn", cpu_address, image_id.index,
+                 frame_number, frame_class, cpu_address, image_id.index,
                  image.info.size.width, image.info.size.height, image.info.guest_size,
                  guest_stats.avg_luma, guest_stats.variance, guest_stats.max_luma,
                  guest_stats.near_black_pct, guest_stats.nonblack_pixels,
@@ -1389,6 +1412,15 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
                  static_cast<u32>(image.usage.render_target),
                  static_cast<u32>(image.usage.depth_target),
                  vk::to_string(image.backing->state.layout));
+        if (std::strcmp(frame_class, "solid") == 0 || std::strcmp(frame_class, "flat") == 0) {
+            RecordGpuCommandDiagnostic(
+                "trace_present_luma_%s frame=%llu addr=0x%llx image_id=%u avg_luma=%.2f "
+                "variance=%.2f max_luma=%u near_black=%.2f last_writer=%s",
+                frame_class, static_cast<unsigned long long>(frame_number),
+                static_cast<unsigned long long>(cpu_address), image_id.index,
+                guest_stats.avg_luma, guest_stats.variance, guest_stats.max_luma,
+                guest_stats.near_black_pct, last_write.op ? last_write.op : "none");
+        }
     }
     const WatchdogReadbackContext watchdog_context{
         .frame_index = frame_number,
@@ -1922,6 +1954,21 @@ Frame* Presenter::GetRenderFrame() {
     const vk::Device device = instance.GetDevice();
     vk::Result result{};
 
+    RecordGpuCommandDiagnostic(
+        "get_render_frame_wait frame=%p frame_image=0x%llx frame_view=0x%llx size=%ux%u "
+        "expected=%ux%u ready_tick=%llu watchdog_videoout=0x%llx watchdog_image_id=%u "
+        "watchdog_samples=%u backing_samples=%u watchdog_layout=%s",
+        static_cast<void*>(frame),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+            static_cast<VkImage>(frame->image))),
+        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+            static_cast<VkImageView>(frame->image_view))),
+        frame->width, frame->height, expected_frame_width, expected_frame_height,
+        static_cast<unsigned long long>(frame->ready_tick),
+        static_cast<unsigned long long>(frame->watchdog_videoout_addr), frame->watchdog_image_id,
+        frame->watchdog_image_samples, frame->watchdog_backing_samples,
+        vk::to_string(frame->watchdog_layout).c_str());
+
     const u64 timeout = GpuWaitTimeoutNs();
     const auto wait = [&]() {
         result = device.waitForFences(frame->present_done, false, timeout);
@@ -1932,6 +1979,18 @@ Frame* Presenter::GetRenderFrame() {
     u32 timeout_count = 0;
     while (wait() != vk::Result::eSuccess) {
         if (result != vk::Result::eTimeout) {
+            RecordGpuCommandDiagnostic(
+                "get_render_frame_wait_failed result=%s frame=%p frame_image=0x%llx "
+                "frame_view=0x%llx ready_tick=%llu watchdog_videoout=0x%llx "
+                "watchdog_image_id=%u",
+                vk::to_string(result).c_str(), static_cast<void*>(frame),
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                    static_cast<VkImage>(frame->image))),
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                    static_cast<VkImageView>(frame->image_view))),
+                static_cast<unsigned long long>(frame->ready_tick),
+                static_cast<unsigned long long>(frame->watchdog_videoout_addr),
+                frame->watchdog_image_id);
             LogGpuWaitFailure("get_render_frame_present_done", result);
         }
         ASSERT_MSG(result != vk::Result::eErrorDeviceLost,

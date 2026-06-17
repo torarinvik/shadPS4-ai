@@ -86,6 +86,17 @@ void Swapchain::Create(u32 width_, u32 height_) {
     };
 
     auto [swapchain_result, chain] = instance.GetDevice().createSwapchainKHR(swapchain_info);
+    if (swapchain_result != vk::Result::eSuccess) {
+        RecordGpuCommandDiagnostic(
+            "swapchain_create_failed result=%s width=%u height=%u image_count=%u format=%s "
+            "color_space=%s present_mode=%s old_swapchain=0x%llx",
+            vk::to_string(swapchain_result).c_str(), width, height, image_count,
+            vk::to_string(format.format).c_str(), vk::to_string(format.colorSpace).c_str(),
+            vk::to_string(present_mode).c_str(),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkSwapchainKHR>(swapchain_info.oldSwapchain))));
+        DumpGpuCommandDiagnostics("swapchain_create_failed");
+    }
     ASSERT_MSG(swapchain_result == vk::Result::eSuccess, "Failed to create swapchain: {}",
                vk::to_string(swapchain_result));
     swapchain = chain;
@@ -132,6 +143,13 @@ bool Swapchain::AcquireNextImage() {
     case vk::Result::eSuccess:
         break;
     case vk::Result::eTimeout:
+        RecordGpuCommandDiagnostic(
+            "swapchain_acquire_timeout frame_index=%u image_count=%u pending_present_tick=%llu "
+            "last_successful_present_tick=%llu successful_present_count=%llu timeout_ns=%llu",
+            frame_index, image_count, static_cast<unsigned long long>(pending_present_tick),
+            static_cast<unsigned long long>(last_successful_present_tick),
+            static_cast<unsigned long long>(successful_present_count),
+            static_cast<unsigned long long>(timeout));
         LogGpuWaitTimeout("swapchain_acquire_next_image", timeout);
         needs_recreation = true;
         break;
@@ -140,9 +158,20 @@ bool Swapchain::AcquireNextImage() {
     case vk::Result::eErrorOutOfDateKHR:
         LOG_WARNING(Render_Vulkan, "Swapchain acquire requires recreation: {}",
                     vk::to_string(result));
+        RecordGpuCommandDiagnostic(
+            "swapchain_acquire_recreate result=%s frame_index=%u image_count=%u "
+            "pending_present_tick=%llu last_successful_present_tick=%llu",
+            vk::to_string(result).c_str(), frame_index, image_count,
+            static_cast<unsigned long long>(pending_present_tick),
+            static_cast<unsigned long long>(last_successful_present_tick));
         needs_recreation = true;
         break;
     case vk::Result::eErrorUnknown:
+        RecordGpuCommandDiagnostic(
+            "swapchain_acquire_error_unknown frame_index=%u image_count=%u "
+            "pending_present_tick=%llu last_successful_present_tick=%llu",
+            frame_index, image_count, static_cast<unsigned long long>(pending_present_tick),
+            static_cast<unsigned long long>(last_successful_present_tick));
         ASSERT_MSG(!IsStrictRenderValidationEnabled(),
                    "Strict render validation: swapchain acquire requires recreation: {}",
                    vk::to_string(result));
@@ -165,6 +194,15 @@ bool Swapchain::AcquireNextImage() {
                      "successful_present_count={} frame_index={} image_count={}",
                      pending_present_tick, last_successful_present_tick, ticks_since_present,
                      successful_present_count, frame_index, image_count);
+        RecordGpuCommandDiagnostic(
+            "swapchain_acquire_unknown_result result=%s frame_index=%u image_count=%u "
+            "pending_present_tick=%llu last_successful_present_tick=%llu "
+            "successful_present_count=%llu ticks_since_present=%llu",
+            vk::to_string(result).c_str(), frame_index, image_count,
+            static_cast<unsigned long long>(pending_present_tick),
+            static_cast<unsigned long long>(last_successful_present_tick),
+            static_cast<unsigned long long>(successful_present_count),
+            static_cast<unsigned long long>(ticks_since_present));
         DumpSchedulerSubmitDiagnostics("swapchain_acquire_device_loss");
         DumpGpuCommandDiagnostics("swapchain_acquire_device_loss");
         UNREACHABLE();
@@ -348,18 +386,38 @@ void Swapchain::RefreshSemaphores() {
     image_acquired.resize(image_count);
     present_ready.resize(image_count);
 
+    u32 semaphore_index = 0;
     for (vk::Semaphore& semaphore : image_acquired) {
         auto [semaphore_result, sem] = device.createSemaphore({});
+        if (semaphore_result != vk::Result::eSuccess) {
+            RecordGpuCommandDiagnostic(
+                "swapchain_image_acquired_semaphore_create_failed result=%s index=%u "
+                "image_count=%u frame_index=%u",
+                vk::to_string(semaphore_result).c_str(), semaphore_index, image_count,
+                frame_index);
+            DumpGpuCommandDiagnostics("swapchain_image_acquired_semaphore_create_failed");
+        }
         ASSERT_MSG(semaphore_result == vk::Result::eSuccess,
                    "Failed to create image acquired semaphore: {}",
                    vk::to_string(semaphore_result));
         semaphore = sem;
+        ++semaphore_index;
     }
+    semaphore_index = 0;
     for (vk::Semaphore& semaphore : present_ready) {
         auto [semaphore_result, sem] = device.createSemaphore({});
+        if (semaphore_result != vk::Result::eSuccess) {
+            RecordGpuCommandDiagnostic(
+                "swapchain_present_ready_semaphore_create_failed result=%s index=%u image_count=%u "
+                "frame_index=%u",
+                vk::to_string(semaphore_result).c_str(), semaphore_index, image_count,
+                frame_index);
+            DumpGpuCommandDiagnostics("swapchain_present_ready_semaphore_create_failed");
+        }
         ASSERT_MSG(semaphore_result == vk::Result::eSuccess,
                    "Failed to create present ready semaphore: {}", vk::to_string(semaphore_result));
         semaphore = sem;
+        ++semaphore_index;
     }
 
     for (u32 i = 0; i < image_count; ++i) {
@@ -371,6 +429,17 @@ void Swapchain::RefreshSemaphores() {
 void Swapchain::SetupImages() {
     vk::Device device = instance.GetDevice();
     auto [images_result, imgs] = device.getSwapchainImagesKHR(swapchain);
+    if (images_result != vk::Result::eSuccess) {
+        RecordGpuCommandDiagnostic(
+            "swapchain_get_images_failed result=%s swapchain=0x%llx extent=%ux%u format=%s hdr=%u",
+            vk::to_string(images_result).c_str(),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkSwapchainKHR>(swapchain))),
+            extent.width, extent.height,
+            vk::to_string(needs_hdr ? SURFACE_FORMAT_HDR.format : surface_format.format).c_str(),
+            static_cast<unsigned>(needs_hdr));
+        DumpGpuCommandDiagnostics("swapchain_get_images_failed");
+    }
     ASSERT_MSG(images_result == vk::Result::eSuccess, "Failed to create swapchain images: {}",
                vk::to_string(images_result));
     images = std::move(imgs);
@@ -391,6 +460,17 @@ void Swapchain::SetupImages() {
                     .layerCount = 1,
                 },
         });
+        if (im_view_result != vk::Result::eSuccess) {
+            RecordGpuCommandDiagnostic(
+                "swapchain_image_view_create_failed result=%s index=%u image=0x%llx format=%s "
+                "extent=%ux%u hdr=%u image_count=%u",
+                vk::to_string(im_view_result).c_str(), i,
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                    static_cast<VkImage>(images[i]))),
+                vk::to_string(needs_hdr ? SURFACE_FORMAT_HDR.format : surface_format.format).c_str(),
+                extent.width, extent.height, static_cast<unsigned>(needs_hdr), image_count);
+            DumpGpuCommandDiagnostics("swapchain_image_view_create_failed");
+        }
         ASSERT_MSG(im_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
                    vk::to_string(im_view_result));
         images_view[i] = im_view;

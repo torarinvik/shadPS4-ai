@@ -8,6 +8,7 @@
 #include "core/emulator_settings.h"
 #include "video_core/host_shaders/fs_tri_vert.h"
 #include "video_core/host_shaders/post_process_frag.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -199,6 +200,21 @@ void PostProcessingPass::Create(vk::Device device, const vk::Format surface_form
 
 void PostProcessingPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
                                 vk::Extent2D input_size, Frame& frame, Settings settings) {
+    if (!input || input_size.width == 0 || input_size.height == 0 || !frame.image ||
+        !frame.image_view || !frame.imgui_texture || frame.width == 0 || frame.height == 0) {
+        RecordGpuCommandDiagnostic(
+            "post_process_invalid_input input_view=0x%llx input_size=%ux%u frame_image=0x%llx "
+            "frame_view=0x%llx frame_texture=0x%llx frame_size=%ux%u hdr=%u",
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkImageView>(input))),
+            input_size.width, input_size.height,
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkImage>(frame.image))),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkImageView>(frame.image_view))),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(frame.imgui_texture)),
+            frame.width, frame.height, static_cast<unsigned>(settings.hdr));
+    }
     ASSERT_MSG(!IsStrictRenderValidationEnabled() ||
                    (input && input_size.width > 0 && input_size.height > 0 && frame.image &&
                     frame.image_view && frame.imgui_texture && frame.width > 0 &&

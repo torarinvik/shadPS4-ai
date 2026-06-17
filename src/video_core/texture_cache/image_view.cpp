@@ -7,6 +7,7 @@
 #include "shader_recompiler/resource.h"
 #include "video_core/host_diagnostics.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/texture_cache/image.h"
 #include "video_core/texture_cache/image_view.h"
@@ -157,6 +158,25 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
                         image.info.guest_address, end_level, image.info.resources.levels, end_layer,
                         image.info.resources.layers));
     }
+    if (empty_range || oob_range) {
+        const std::string image_type_name{magic_enum::enum_name(image.info.type)};
+        const std::string view_type_name{magic_enum::enum_name(info.type)};
+        Vulkan::RecordGpuCommandDiagnostic(
+            "image_view_invalid_range addr=0x%llx size=%u image_handle=0x%llx image_type=%s "
+            "view_type=%s image_format=%s view_format=%s actual_view_format=%s levels=%u "
+            "layers=%u base_level=%u view_levels=%u end_level=%u base_layer=%u view_layers=%u "
+            "end_layer=%u empty=%u oob=%u storage=%u",
+            static_cast<unsigned long long>(image.info.guest_address), image.info.guest_size,
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkImage>(image_view_ci.image))),
+            image_type_name.c_str(), view_type_name.c_str(),
+            vk::to_string(image.info.pixel_format).c_str(), vk::to_string(info.format).c_str(),
+            vk::to_string(image_view_ci.format).c_str(), image.info.resources.levels,
+            image.info.resources.layers, info.range.base.level, info.range.extent.levels,
+            end_level, info.range.base.layer, info.range.extent.layers, end_layer,
+            static_cast<unsigned>(empty_range), static_cast<unsigned>(oob_range),
+            static_cast<unsigned>(info.is_storage));
+    }
     if (format_substituted) {
         LOG_INFO(Render_Vulkan,
                  "TRACE_IMAGE_VIEW format_substitution guest_addr={:#x} guest_size={} "
@@ -201,6 +221,15 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     if (!IsViewTypeCompatible(info.type, image.info.type)) {
         LOG_ERROR(Render_Vulkan, "image view type {} is incompatible with image type {}",
                   magic_enum::enum_name(info.type), magic_enum::enum_name(image.info.type));
+        const std::string image_type_name{magic_enum::enum_name(image.info.type)};
+        const std::string view_type_name{magic_enum::enum_name(info.type)};
+        Vulkan::RecordGpuCommandDiagnostic(
+            "image_view_incompatible_type addr=0x%llx size=%u image_type=%s view_type=%s "
+            "format=%s base_layer=%u layers=%u image_layers=%u",
+            static_cast<unsigned long long>(image.info.guest_address), image.info.guest_size,
+            image_type_name.c_str(), view_type_name.c_str(),
+            vk::to_string(image.info.pixel_format).c_str(), info.range.base.layer,
+            info.range.extent.layers, image.info.resources.layers);
         ASSERT_MSG(!IsStrictRenderValidationEnabled(),
                    "Strict render validation: image view type {} is incompatible with image type {} "
                    "guest_addr={:#x} guest_size={} format={} view_base_layer={} view_layers={} "
@@ -212,6 +241,23 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     }
 
     auto [view_result, view] = instance.GetDevice().createImageViewUnique(image_view_ci);
+    if (view_result != vk::Result::eSuccess) {
+        const std::string image_type_name{magic_enum::enum_name(image.info.type)};
+        const std::string view_type_name{magic_enum::enum_name(info.type)};
+        Vulkan::RecordGpuCommandDiagnostic(
+            "image_view_create_failed result=%s addr=0x%llx size=%u image_handle=0x%llx "
+            "image_type=%s view_type=%s image_format=%s actual_view_format=%s levels=%u "
+            "layers=%u base_level=%u view_levels=%u base_layer=%u view_layers=%u aspect=%s",
+            vk::to_string(view_result).c_str(),
+            static_cast<unsigned long long>(image.info.guest_address), image.info.guest_size,
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkImage>(image_view_ci.image))),
+            image_type_name.c_str(), view_type_name.c_str(),
+            vk::to_string(image.info.pixel_format).c_str(), vk::to_string(image_view_ci.format).c_str(),
+            image.info.resources.levels, image.info.resources.layers, info.range.base.level,
+            info.range.extent.levels, info.range.base.layer, info.range.extent.layers,
+            vk::to_string(aspect).c_str());
+    }
     ASSERT_MSG(view_result == vk::Result::eSuccess, "Failed to create image view: {}",
                vk::to_string(view_result));
     image_view = std::move(view);

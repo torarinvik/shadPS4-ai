@@ -3,6 +3,7 @@
 
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/host_diagnostics.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -75,6 +76,11 @@ TileManager::TileManager(const Vulkan::Instance& instance, Vulkan::Scheduler& sc
         .pBindings = bindings.data(),
     };
     auto desc_layout_result = device.createDescriptorSetLayoutUnique(desc_layout_ci);
+    if (desc_layout_result.result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic("tile_descriptor_layout_failed result=%s",
+                                           vk::to_string(desc_layout_result.result).c_str());
+        Vulkan::DumpGpuCommandDiagnostics("tile_descriptor_layout_failed");
+    }
     ASSERT_MSG(desc_layout_result.result == vk::Result::eSuccess,
                "Failed to create descriptor set layout: {}",
                vk::to_string(desc_layout_result.result));
@@ -88,6 +94,11 @@ TileManager::TileManager(const Vulkan::Instance& instance, Vulkan::Scheduler& sc
         .pPushConstantRanges = nullptr,
     };
     auto [layout_result, layout] = device.createPipelineLayoutUnique(layout_info);
+    if (layout_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic("tile_pipeline_layout_failed result=%s",
+                                           vk::to_string(layout_result).c_str());
+        Vulkan::DumpGpuCommandDiagnostics("tile_pipeline_layout_failed");
+    }
     ASSERT_MSG(layout_result == vk::Result::eSuccess, "Failed to create pipeline layout: {}",
                vk::to_string(layout_result));
     pl_layout = std::move(layout);
@@ -114,6 +125,12 @@ TileManager::ScratchBuffer TileManager::GetScratchBuffer(u32 size) {
     const auto buffer_ci_unsafe = static_cast<VkBufferCreateInfo>(buffer_ci);
     const auto result = vmaCreateBuffer(instance.GetAllocator(), &buffer_ci_unsafe, &alloc_info,
                                         &buffer, &allocation, nullptr);
+    if (result != VK_SUCCESS) {
+        Vulkan::RecordGpuCommandDiagnostic("tile_scratch_buffer_alloc_failed result=%s size=%llu",
+                                           vk::to_string(vk::Result{result}).c_str(),
+                                           static_cast<unsigned long long>(size));
+        Vulkan::DumpGpuCommandDiagnostics("tile_scratch_buffer_alloc_failed");
+    }
     ASSERT(result == VK_SUCCESS);
     return {buffer, allocation};
 }
@@ -184,6 +201,14 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
     };
     auto [result, pipeline] =
         device.createComputePipelineUnique(VK_NULL_HANDLE, compute_pipeline_ci);
+    if (result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "tile_pipeline_create_failed result=%s tile_mode=%u array_mode=%u bpp=%u samples=%u "
+            "is_tiler=%u",
+            vk::to_string(result).c_str(), static_cast<u32>(info.tile_mode),
+            static_cast<u32>(info.array_mode), info.num_bits, info.num_samples, is_tiler ? 1 : 0);
+        Vulkan::DumpGpuCommandDiagnostics("tile_pipeline_create_failed");
+    }
     ASSERT_MSG(result == vk::Result::eSuccess, "Detiler pipeline creation failed {}",
                vk::to_string(result));
     pipeline_slot = std::move(pipeline);

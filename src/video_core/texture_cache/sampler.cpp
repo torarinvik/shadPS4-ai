@@ -4,6 +4,7 @@
 #include <algorithm>
 #include "common/assert.h"
 #include "common/trace_control.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/texture_cache/sampler.h"
@@ -77,6 +78,22 @@ Sampler::Sampler(const Vulkan::Instance& instance, const AmdGpu::Sampler& sample
         .unnormalizedCoordinates = false, // Handled in shader due to Vulkan limitations.
     };
     auto [sampler_result, smplr] = instance.GetDevice().createSamplerUnique(sampler_ci);
+    if (sampler_result != vk::Result::eSuccess) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "sampler_create_failed result=%s mag=%u min=%u mip=%u clamp=%u/%u/%u compare=%u "
+            "border=%u aniso=%u lod=%f..%f bias=%f",
+            vk::to_string(sampler_result).c_str(),
+            static_cast<u32>(static_cast<AmdGpu::Filter>(sampler.xy_mag_filter)),
+            static_cast<u32>(static_cast<AmdGpu::Filter>(sampler.xy_min_filter)),
+            static_cast<u32>(static_cast<AmdGpu::MipFilter>(sampler.mip_filter)),
+            static_cast<u32>(static_cast<AmdGpu::ClampMode>(sampler.clamp_x)),
+            static_cast<u32>(static_cast<AmdGpu::ClampMode>(sampler.clamp_y)),
+            static_cast<u32>(static_cast<AmdGpu::ClampMode>(sampler.clamp_z)),
+            static_cast<u32>(static_cast<AmdGpu::DepthCompare>(sampler.depth_compare_func)),
+            static_cast<u32>(static_cast<AmdGpu::BorderColor>(sampler.border_color_type)),
+            anisotropy_enable ? 1 : 0, min_lod, max_lod, sampler_ci.mipLodBias);
+        Vulkan::DumpGpuCommandDiagnostics("sampler_create_failed");
+    }
     ASSERT_MSG(sampler_result == vk::Result::eSuccess, "Failed to create sampler: {}",
                vk::to_string(sampler_result));
     handle = std::move(smplr);

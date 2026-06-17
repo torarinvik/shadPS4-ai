@@ -5,6 +5,7 @@
 
 #include "shader_recompiler/info.h"
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
@@ -85,6 +86,18 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     const auto device = instance.GetDevice();
     auto [descriptor_set_result, descriptor_set] =
         device.createDescriptorSetLayoutUnique(desc_layout_ci);
+    if (descriptor_set_result != vk::Result::eSuccess) {
+        RecordGpuCommandDiagnostic(
+            "compute_desc_layout_create_failed result=%s bindings=%u total_binding_slots=%u "
+            "push_descriptors=%u max_push_descriptors=%u buffers=%zu images=%zu samplers=%zu "
+            "pgm=0x%llx debug=%s",
+            vk::to_string(descriptor_set_result).c_str(), static_cast<u32>(bindings.size()),
+            binding, static_cast<unsigned>(uses_push_descriptors),
+            instance.MaxPushDescriptors(), info->buffers.size(), info->images.size(),
+            info->samplers.size(), static_cast<unsigned long long>(info->pgm_hash),
+            debug_str.c_str());
+        DumpGpuCommandDiagnostics("compute_desc_layout_create_failed");
+    }
     ASSERT_MSG(descriptor_set_result == vk::Result::eSuccess,
                "Failed to create compute descriptor set layout: {}",
                vk::to_string(descriptor_set_result));
@@ -98,6 +111,15 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         .pPushConstantRanges = &push_constants,
     };
     auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
+    if (layout_result != vk::Result::eSuccess) {
+        RecordGpuCommandDiagnostic(
+            "compute_pipeline_layout_create_failed result=%s bindings=%u total_binding_slots=%u "
+            "push_constant_size=%u push_descriptors=%u pgm=0x%llx debug=%s",
+            vk::to_string(layout_result).c_str(), static_cast<u32>(bindings.size()), binding,
+            push_constants.size, static_cast<unsigned>(uses_push_descriptors),
+            static_cast<unsigned long long>(info->pgm_hash), debug_str.c_str());
+        DumpGpuCommandDiagnostics("compute_pipeline_layout_create_failed");
+    }
     ASSERT_MSG(layout_result == vk::Result::eSuccess,
                "Failed to create compute pipeline layout: {}", vk::to_string(layout_result));
     pipeline_layout = std::move(layout);
@@ -109,6 +131,17 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     };
     auto [pipeline_result, pipe] =
         instance.GetDevice().createComputePipelineUnique(pipeline_cache, compute_pipeline_ci);
+    if (pipeline_result != vk::Result::eSuccess) {
+        RecordGpuCommandDiagnostic(
+            "compute_pipeline_create_failed result=%s pgm=0x%llx bindings=%u total_binding_slots=%u "
+            "push_descriptors=%u subgroup64=%u preloading=%u debug=%s",
+            vk::to_string(pipeline_result).c_str(),
+            static_cast<unsigned long long>(info->pgm_hash), static_cast<u32>(bindings.size()),
+            binding, static_cast<unsigned>(uses_push_descriptors),
+            static_cast<unsigned>(instance.IsSubgroupSize64Supported()),
+            static_cast<unsigned>(preloading), debug_str.c_str());
+        DumpGpuCommandDiagnostics("compute_pipeline_create_failed");
+    }
     ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create compute pipeline: {}",
                vk::to_string(pipeline_result));
     pipeline = std::move(pipe);

@@ -8,6 +8,7 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/trace_control.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
 namespace Vulkan {
@@ -203,6 +204,11 @@ vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, v
     std::string preprocessedStr;
     if (!shader->preprocess(&DefaultTBuiltInResource, default_version, profile, false, true,
                             messages, &preprocessedStr, includer)) [[unlikely]] {
+        RecordGpuCommandDiagnostic(
+            "shader_preprocess_failed stage=%s source_bytes=%zu defines=%zu info_log_bytes=%zu "
+            "debug_log_bytes=%zu",
+            vk::to_string(stage).c_str(), code.size(), defines.size(),
+            std::strlen(shader->getInfoLog()), std::strlen(shader->getInfoDebugLog()));
         Common::Trace::RecordFirstShaderCompileFailure("preprocess", static_cast<u32>(stage),
                                                        code.size() / sizeof(u32));
         LOG_ERROR(Render_Vulkan,
@@ -216,6 +222,11 @@ vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, v
 
     if (!shader->parse(&DefaultTBuiltInResource, default_version, profile, false, true, messages,
                        includer)) [[unlikely]] {
+        RecordGpuCommandDiagnostic(
+            "shader_parse_failed stage=%s source_bytes=%zu defines=%zu info_log_bytes=%zu "
+            "debug_log_bytes=%zu",
+            vk::to_string(stage).c_str(), code.size(), defines.size(),
+            std::strlen(shader->getInfoLog()), std::strlen(shader->getInfoDebugLog()));
         Common::Trace::RecordFirstShaderCompileFailure("parse", static_cast<u32>(stage),
                                                        code.size() / sizeof(u32));
         LOG_ERROR(Render_Vulkan,
@@ -231,6 +242,11 @@ vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, v
     auto program = std::make_unique<glslang::TProgram>();
     program->addShader(shader.get());
     if (!program->link(messages)) {
+        RecordGpuCommandDiagnostic(
+            "shader_link_failed stage=%s source_bytes=%zu defines=%zu info_log_bytes=%zu "
+            "debug_log_bytes=%zu",
+            vk::to_string(stage).c_str(), code.size(), defines.size(),
+            std::strlen(program->getInfoLog()), std::strlen(program->getInfoDebugLog()));
         Common::Trace::RecordFirstShaderCompileFailure("link", static_cast<u32>(stage),
                                                        code.size() / sizeof(u32));
         LOG_ERROR(Render_Vulkan,
@@ -269,6 +285,10 @@ vk::ShaderModule CompileSPV(std::span<const u32> code, vk::Device device) {
 
     auto [module_result, module] = device.createShaderModule(shader_info);
     if (module_result != vk::Result::eSuccess) [[unlikely]] {
+        RecordGpuCommandDiagnostic("shader_module_create_failed result=%s spirv_words=%zu bytes=%zu",
+                                   vk::to_string(module_result).c_str(), code.size(),
+                                   code.size() * sizeof(u32));
+        DumpGpuCommandDiagnostics("shader_module_create_failed");
         Common::Trace::RecordFirstShaderCompileFailure(
             "create_module", 0, code.size(), static_cast<u64>(static_cast<VkResult>(module_result)));
     }

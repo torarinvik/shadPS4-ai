@@ -23,6 +23,7 @@
 #include "common/path_util.h"
 #include "core/emulator_settings.h"
 #include "sdl_window.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
 #ifdef __APPLE__
@@ -117,8 +118,12 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
             .hwnd = static_cast<HWND>(window_info.render_surface),
         };
 
-        if (instance.createWin32SurfaceKHR(&win32_ci, nullptr, &surface) != vk::Result::eSuccess) {
+        const auto result = instance.createWin32SurfaceKHR(&win32_ci, nullptr, &surface);
+        if (result != vk::Result::eSuccess) {
             LOG_CRITICAL(Render_Vulkan, "Failed to initialize Win32 surface");
+            RecordGpuCommandDiagnostic("surface_create_failed platform=win32 result=%s",
+                                       vk::to_string(result).c_str());
+            DumpGpuCommandDiagnostics("surface_create_failed");
             UNREACHABLE();
         }
     }
@@ -129,8 +134,12 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
             .window = reinterpret_cast<Window>(window_info.render_surface),
         };
 
-        if (instance.createXlibSurfaceKHR(&xlib_ci, nullptr, &surface) != vk::Result::eSuccess) {
+        const auto result = instance.createXlibSurfaceKHR(&xlib_ci, nullptr, &surface);
+        if (result != vk::Result::eSuccess) {
             LOG_ERROR(Render_Vulkan, "Failed to initialize Xlib surface");
+            RecordGpuCommandDiagnostic("surface_create_failed platform=xlib result=%s",
+                                       vk::to_string(result).c_str());
+            DumpGpuCommandDiagnostics("surface_create_failed");
             UNREACHABLE();
         }
     } else if (window_info.type == Frontend::WindowSystemType::Wayland) {
@@ -144,9 +153,12 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
             .surface = static_cast<wl_surface*>(window_info.render_surface),
         };
 
-        if (instance.createWaylandSurfaceKHR(&wayland_ci, nullptr, &surface) !=
-            vk::Result::eSuccess) {
+        const auto result = instance.createWaylandSurfaceKHR(&wayland_ci, nullptr, &surface);
+        if (result != vk::Result::eSuccess) {
             LOG_ERROR(Render_Vulkan, "Failed to initialize Wayland surface");
+            RecordGpuCommandDiagnostic("surface_create_failed platform=wayland result=%s",
+                                       vk::to_string(result).c_str());
+            DumpGpuCommandDiagnostics("surface_create_failed");
             UNREACHABLE();
         }
     }
@@ -156,8 +168,12 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
             .pLayer = static_cast<const CAMetalLayer*>(window_info.render_surface),
         };
 
-        if (instance.createMetalSurfaceEXT(&macos_ci, nullptr, &surface) != vk::Result::eSuccess) {
+        const auto result = instance.createMetalSurfaceEXT(&macos_ci, nullptr, &surface);
+        if (result != vk::Result::eSuccess) {
             LOG_CRITICAL(Render_Vulkan, "Failed to initialize MacOS surface");
+            RecordGpuCommandDiagnostic("surface_create_failed platform=metal result=%s",
+                                       vk::to_string(result).c_str());
+            DumpGpuCommandDiagnostics("surface_create_failed");
             UNREACHABLE();
         }
     }
@@ -165,6 +181,9 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
 
     if (!surface) {
         LOG_CRITICAL(Render_Vulkan, "Presentation not supported on this platform");
+        RecordGpuCommandDiagnostic("surface_create_failed platform=unsupported window_type=%u",
+                                   static_cast<u32>(window_info.type));
+        DumpGpuCommandDiagnostics("surface_create_failed");
         UNREACHABLE();
     }
 

@@ -262,6 +262,20 @@ u64 Scheduler::SubmitExecution(SubmitInfo& info) {
 
     ImGui::Core::TextureManager::Submit();
     auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
+    if (submit_result != vk::Result::eSuccess) {
+        RecordGpuCommandDiagnostic(
+            "scheduler_submit_failed scheduler=%s command_buffer_index=%zu signal_tick=%llu "
+            "wait_count=%u signal_count=%u fence=0x%llx result=%s known_gpu_tick=%llu "
+            "current_tick=%llu",
+            name.data(), current_cmdbuf_index, static_cast<unsigned long long>(signal_value),
+            info.num_wait_semas, info.num_signal_semas,
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(static_cast<VkFence>(info.fence))),
+            vk::to_string(submit_result).c_str(),
+            static_cast<unsigned long long>(master_semaphore.KnownGpuTick()),
+            static_cast<unsigned long long>(master_semaphore.CurrentTick()));
+        DumpSchedulerSubmitDiagnostics("scheduler_submit_failed");
+        DumpGpuCommandDiagnostics("scheduler_submit_failed");
+    }
     ASSERT_MSG(submit_result == vk::Result::eSuccess, "Queue submit failed: {}",
                vk::to_string(submit_result));
 

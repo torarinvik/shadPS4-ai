@@ -6,6 +6,7 @@
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "shader_recompiler/info.h"
 #include "video_core/cache_storage.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -150,12 +151,16 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
     Storage::DataBase::Instance().Load(Storage::BlobType::ShaderMeta,
                                        fmt::format("{:#018x}", compute_key.value), meta_blob);
     if (meta_blob.empty()) {
+        RecordGpuCommandDiagnostic("pipeline_cache_load_compute_missing_meta key=0x%llx",
+                                   static_cast<unsigned long long>(compute_key.value));
         return false;
     }
 
     Serialization::Archive meta_ar{std::move(meta_blob)};
 
     if (!LoadPipelineStage(meta_ar, 0)) {
+        RecordGpuCommandDiagnostic("pipeline_cache_load_compute_stage_failed key=0x%llx",
+                                   static_cast<unsigned long long>(compute_key.value));
         return false;
     }
 
@@ -224,12 +229,18 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
         Storage::DataBase::Instance().Load(Storage::BlobType::ShaderMeta,
                                            fmt::format("{:#018x}", hash), meta_blob);
         if (meta_blob.empty()) {
+            RecordGpuCommandDiagnostic(
+                "pipeline_cache_load_graphics_missing_meta stage=%d hash=0x%llx mrt_mask=0x%x",
+                stage_idx, static_cast<unsigned long long>(hash), graphics_key.mrt_mask);
             return false;
         }
 
         Serialization::Archive meta_ar{std::move(meta_blob)};
 
         if (!LoadPipelineStage(meta_ar, stage_idx)) {
+            RecordGpuCommandDiagnostic(
+                "pipeline_cache_load_graphics_stage_failed stage=%d hash=0x%llx mrt_mask=0x%x",
+                stage_idx, static_cast<unsigned long long>(hash), graphics_key.mrt_mask);
             return false;
         }
     }
@@ -262,6 +273,10 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
                                        fmt::format("{:#018x}_{}", program->info.pgm_hash, perm_idx),
                                        spv);
     if (spv.empty()) {
+        RecordGpuCommandDiagnostic(
+            "pipeline_cache_load_stage_missing_binary stage=%zu pgm=0x%llx perm=%zu shader_stage=%u",
+            stage, static_cast<unsigned long long>(program->info.pgm_hash), perm_idx,
+            static_cast<u32>(program->info.stage));
         return false;
     }
 
@@ -310,6 +325,7 @@ void PipelineCache::WarmUp() {
     std::vector<u8> profile_data{};
     Storage::DataBase::Instance().Load(Storage::BlobType::ShaderProfile, "profile", profile_data);
     if (profile_data.empty()) {
+        RecordGpuCommandDiagnostic("pipeline_cache_profile_missing action=write_current_profile");
         Storage::DataBase::Instance().FinishPreload();
 
         profile_data.resize(sizeof(profile));
@@ -321,6 +337,8 @@ void PipelineCache::WarmUp() {
     if (std::memcmp(profile_data.data(), &profile, sizeof(profile)) != 0) {
         LOG_WARNING(Render,
                     "Pipeline cache isn't compatible with current system. Ignoring the cache");
+        RecordGpuCommandDiagnostic("pipeline_cache_profile_incompatible profile_bytes=%zu",
+                                   profile_data.size());
         return;
     }
 
@@ -337,6 +355,8 @@ void PipelineCache::WarmUp() {
             u32 version{};
             pldata.Read(version);
             if (version != Serialization::PipelineKeyVersion) {
+                RecordGpuCommandDiagnostic("pipeline_cache_key_version_mismatch version=%u expected=%u",
+                                           version, Serialization::PipelineKeyVersion);
                 return;
             }
 

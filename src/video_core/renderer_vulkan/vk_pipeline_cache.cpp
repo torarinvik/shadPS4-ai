@@ -17,6 +17,7 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -333,6 +334,14 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     WarmUp();
 
     auto [cache_result, cache] = instance.GetDevice().createPipelineCacheUnique({});
+    if (cache_result != vk::Result::eSuccess) {
+        RecordGpuCommandDiagnostic(
+            "pipeline_cache_create_failed result=%s driver_id=%s spirv_version=0x%x "
+            "pipeline_cache_enabled=%u",
+            vk::to_string(cache_result).c_str(), vk::to_string(instance.GetDriverID()).c_str(),
+            SpirvVersion1_6, static_cast<unsigned>(EmulatorSettings.IsPipelineCacheEnabled()));
+        DumpGpuCommandDiagnostics("pipeline_cache_create_failed");
+    }
     ASSERT_MSG(cache_result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
                vk::to_string(cache_result));
     pipeline_cache = std::move(cache);

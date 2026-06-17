@@ -7,6 +7,7 @@
 #include "video_core/host_diagnostics.h"
 #include "video_core/host_shaders/fsr_comp.h"
 #include "video_core/renderer_vulkan/host_passes/fsr_pass.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
@@ -146,6 +147,17 @@ void FsrPass::Create(vk::Device device, VmaAllocator allocator, u32 num_images) 
 vk::ImageView FsrPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
                               vk::Extent2D input_size, vk::Extent2D output_size, Settings settings,
                               bool hdr) {
+    if (!input || input_size.width == 0 || input_size.height == 0 || output_size.width == 0 ||
+        output_size.height == 0) {
+        RecordGpuCommandDiagnostic(
+            "fsr_invalid_input input_view=0x%llx input_size=%ux%u output_size=%ux%u enabled=%u "
+            "rcas=%u hdr=%u",
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkImageView>(input))),
+            input_size.width, input_size.height, output_size.width, output_size.height,
+            static_cast<unsigned>(settings.enable), static_cast<unsigned>(settings.use_rcas),
+            static_cast<unsigned>(hdr));
+    }
     ASSERT_MSG(!IsStrictRenderValidationEnabled() ||
                    (input && input_size.width > 0 && input_size.height > 0 &&
                     output_size.width > 0 && output_size.height > 0),
@@ -177,6 +189,22 @@ vk::ImageView FsrPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
 
     if (img.dirty) {
         CreateImages(img);
+    }
+    if (!img.intermediary_image || !img.output_image || !img.intermediary_image_view ||
+        !img.output_image_view || width == 0 || height == 0) {
+        RecordGpuCommandDiagnostic(
+            "fsr_invalid_working_images id=%d dirty=%u intermediate=0x%llx "
+            "intermediate_view=0x%llx output=0x%llx output_view=0x%llx size=%ux%u",
+            img.id, static_cast<unsigned>(img.dirty),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkImage>(img.intermediary_image.image))),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkImageView>(img.intermediary_image_view.get()))),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkImage>(img.output_image.image))),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkImageView>(img.output_image_view.get()))),
+            width, height);
     }
     ASSERT_MSG(!IsStrictRenderValidationEnabled() ||
                    (img.intermediary_image && img.output_image && img.intermediary_image_view &&

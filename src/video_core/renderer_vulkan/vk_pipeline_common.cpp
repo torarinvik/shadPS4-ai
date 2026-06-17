@@ -7,6 +7,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_pipeline_common.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
 namespace Vulkan {
@@ -42,12 +43,28 @@ void Pipeline::BindResources(DescriptorWrites& set_writes, const BufferBarriers&
     if (set_writes.empty()) {
         return;
     }
+    if (!pipeline_layout) {
+        RecordGpuCommandDiagnostic(
+            "pipeline_bind_missing_layout bind_point=%s set_writes=%zu buffer_barriers=%zu "
+            "push_descriptors=%u debug=%s",
+            IsCompute() ? "compute" : "graphics", set_writes.size(), buffer_barriers.size(),
+            static_cast<unsigned>(uses_push_descriptors), GetDebugString().c_str());
+        DumpGpuCommandDiagnostics("pipeline_bind_missing_layout");
+    }
 
     if (uses_push_descriptors) {
         cmdbuf.pushDescriptorSetKHR(bind_point, *pipeline_layout, 0, set_writes);
         return;
     }
 
+    if (!desc_layout) {
+        RecordGpuCommandDiagnostic(
+            "pipeline_bind_missing_desc_layout bind_point=%s set_writes=%zu buffer_barriers=%zu "
+            "debug=%s",
+            IsCompute() ? "compute" : "graphics", set_writes.size(), buffer_barriers.size(),
+            GetDebugString().c_str());
+        DumpGpuCommandDiagnostics("pipeline_bind_missing_desc_layout");
+    }
     const auto desc_set = desc_heap.Commit(*desc_layout);
     for (auto& set_write : set_writes) {
         set_write.dstSet = desc_set;

@@ -9,6 +9,7 @@
 #include "shader_recompiler/backend/spirv/emit_spirv_quad_rect.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -54,6 +55,17 @@ GraphicsPipeline::GraphicsPipeline(
         .pPushConstantRanges = &push_constants,
     };
     auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
+    if (layout_result != vk::Result::eSuccess) {
+        RecordGpuCommandDiagnostic(
+            "graphics_pipeline_layout_create_failed result=%s set_layout=0x%llx "
+            "push_constant_size=%u mrt_mask=0x%x preloading=%u debug=%s",
+            vk::to_string(layout_result).c_str(),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkDescriptorSetLayout>(set_layout))),
+            push_constants.size, key.mrt_mask, static_cast<unsigned>(preloading),
+            debug_str.c_str());
+        DumpGpuCommandDiagnostics("graphics_pipeline_layout_create_failed");
+    }
     ASSERT_MSG(layout_result == vk::Result::eSuccess,
                "Failed to create graphics pipeline layout: {}", vk::to_string(layout_result));
     pipeline_layout = std::move(layout);
@@ -382,6 +394,21 @@ GraphicsPipeline::GraphicsPipeline(
 
     auto [pipeline_result, pipe] =
         device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
+    if (pipeline_result != vk::Result::eSuccess) {
+        RecordGpuCommandDiagnostic(
+            "graphics_pipeline_create_failed result=%s stages=%u aux_stages=%zu mrt_mask=0x%x "
+            "primitive=%u patch_control_points=%u color0=%s depth=%s stencil=%s "
+            "dynamic_vertex_input=%u extended_dynamic_state3=%u preloading=%u debug=%s",
+            vk::to_string(pipeline_result).c_str(), pipeline_info.stageCount,
+            aux_shader_modules.size(), key.mrt_mask, static_cast<u32>(key.prim_type),
+            key.patch_control_points, vk::to_string(color_formats[0]).c_str(),
+            vk::to_string(depth_attachment_format).c_str(),
+            vk::to_string(stencil_attachment_format).c_str(),
+            static_cast<unsigned>(instance.IsVertexInputDynamicState()),
+            static_cast<unsigned>(instance.IsExtendedDynamicState3Supported()),
+            static_cast<unsigned>(preloading), debug_str.c_str());
+        DumpGpuCommandDiagnostics("graphics_pipeline_create_failed");
+    }
     ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
                vk::to_string(pipeline_result));
     pipeline = std::move(pipe);
@@ -497,6 +524,29 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
     };
     auto [layout_result, layout] =
         instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci);
+    if (layout_result != vk::Result::eSuccess) {
+        u32 active_stages = 0;
+        u32 total_buffers = 0;
+        u32 total_images = 0;
+        u32 total_samplers = 0;
+        for (const auto* stage : stages) {
+            if (!stage) {
+                continue;
+            }
+            ++active_stages;
+            total_buffers += static_cast<u32>(stage->buffers.size());
+            total_images += static_cast<u32>(stage->images.size());
+            total_samplers += static_cast<u32>(stage->samplers.size());
+        }
+        RecordGpuCommandDiagnostic(
+            "graphics_desc_layout_create_failed result=%s bindings=%u total_binding_slots=%u "
+            "push_descriptors=%u max_push_descriptors=%u active_stages=%u buffers=%u images=%u "
+            "samplers=%u debug=%s",
+            vk::to_string(layout_result).c_str(), static_cast<u32>(bindings.size()), binding,
+            static_cast<unsigned>(uses_push_descriptors), instance.MaxPushDescriptors(),
+            active_stages, total_buffers, total_images, total_samplers, GetDebugString().c_str());
+        DumpGpuCommandDiagnostics("graphics_desc_layout_create_failed");
+    }
     ASSERT_MSG(layout_result == vk::Result::eSuccess,
                "Failed to create graphics descriptor set layout: {}", vk::to_string(layout_result));
     desc_layout = std::move(layout);

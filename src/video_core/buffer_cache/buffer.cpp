@@ -272,6 +272,15 @@ void UniqueBuffer::Create(const vk::BufferCreateInfo& buffer_ci, MemoryUsage usa
             if (buffer_ci.usage & vk::BufferUsageFlagBits::eShaderDeviceAddress) {
                 vk::BufferDeviceAddressInfo bda_info{.buffer = buffer};
                 bda_addr = device.getBufferAddress(bda_info);
+                if (bda_addr == 0) {
+                    Vulkan::RecordGpuCommandDiagnostic(
+                        "buffer_reuse_bda_failed size=%llu usage=%s memory_usage=%s handle=0x%llx",
+                        static_cast<unsigned long long>(buffer_ci.size),
+                        vk::to_string(buffer_ci.usage).c_str(), BufferTypeName(usage).data(),
+                        static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                            static_cast<VkBuffer>(buffer))));
+                    Vulkan::DumpGpuCommandDiagnostics("buffer_reuse_bda_failed");
+                }
                 ASSERT_MSG(bda_addr != 0, "Failed to get buffer device address");
             }
             return;
@@ -284,6 +293,17 @@ void UniqueBuffer::Create(const vk::BufferCreateInfo& buffer_ci, MemoryUsage usa
     VkBuffer unsafe_buffer{};
     VkResult result = vmaCreateBuffer(allocator, &buffer_ci_unsafe, &alloc_ci, &unsafe_buffer,
                                       &allocation, out_alloc_info);
+    if (result != VK_SUCCESS) {
+        Vulkan::RecordGpuCommandDiagnostic(
+            "buffer_alloc_failed result=%s size=%llu usage=%s sharing=%s memory_usage=%s "
+            "alloc_flags=0x%x preferred_flags=0x%x required_flags=0x%x",
+            vk::to_string(vk::Result{result}).c_str(),
+            static_cast<unsigned long long>(buffer_ci.size), vk::to_string(buffer_ci.usage).c_str(),
+            vk::to_string(buffer_ci.sharingMode).c_str(), BufferTypeName(usage).data(),
+            static_cast<u32>(alloc_ci.flags), static_cast<u32>(alloc_ci.preferredFlags),
+            static_cast<u32>(alloc_ci.requiredFlags));
+        Vulkan::DumpGpuCommandDiagnostics("buffer_alloc_failed");
+    }
     ASSERT_MSG(result == VK_SUCCESS, "Failed allocating buffer with error {}",
                vk::to_string(vk::Result{result}));
     buffer = vk::Buffer{unsafe_buffer};
@@ -293,6 +313,15 @@ void UniqueBuffer::Create(const vk::BufferCreateInfo& buffer_ci, MemoryUsage usa
             .buffer = buffer,
         };
         auto bda_result = device.getBufferAddress(bda_info);
+        if (bda_result == 0) {
+            Vulkan::RecordGpuCommandDiagnostic(
+                "buffer_bda_failed size=%llu usage=%s memory_usage=%s handle=0x%llx",
+                static_cast<unsigned long long>(buffer_ci.size), vk::to_string(buffer_ci.usage).c_str(),
+                BufferTypeName(usage).data(),
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                    static_cast<VkBuffer>(buffer))));
+            Vulkan::DumpGpuCommandDiagnostics("buffer_bda_failed");
+        }
         ASSERT_MSG(bda_result != 0, "Failed to get buffer device address");
         bda_addr = bda_result;
     }

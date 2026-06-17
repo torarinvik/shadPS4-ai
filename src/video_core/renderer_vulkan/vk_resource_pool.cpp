@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <optional>
 #include "common/assert.h"
+#include "video_core/renderer_vulkan/vk_gpu_command_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
@@ -149,6 +150,32 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     }
 
     // The pool has run out. Record current tick and place it in pending list.
+    if (result != vk::Result::eErrorOutOfPoolMemory && result != vk::Result::eErrorFragmentedPool) {
+        RecordGpuCommandDiagnostic(
+            "descriptor_alloc_unexpected_failed result=%s pool=0x%llx set_layout=0x%llx "
+            "batch=%u heap_count=%u pending_pools=%zu current_tick=%llu known_gpu_tick=%llu",
+            vk::to_string(result).c_str(),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkDescriptorPool>(curr_pool))),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkDescriptorSetLayout>(set_layout))),
+            DescriptorSetBatch, descriptor_heap_count, pending_pools.size(),
+            static_cast<unsigned long long>(master_semaphore->CurrentTick()),
+            static_cast<unsigned long long>(master_semaphore->KnownGpuTick()));
+        DumpGpuCommandDiagnostics("descriptor_alloc_unexpected_failed");
+    } else {
+        RecordGpuCommandDiagnostic(
+            "descriptor_pool_exhausted result=%s pool=0x%llx set_layout=0x%llx batch=%u "
+            "heap_count=%u pending_pools=%zu current_tick=%llu known_gpu_tick=%llu",
+            vk::to_string(result).c_str(),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkDescriptorPool>(curr_pool))),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkDescriptorSetLayout>(set_layout))),
+            DescriptorSetBatch, descriptor_heap_count, pending_pools.size(),
+            static_cast<unsigned long long>(master_semaphore->CurrentTick()),
+            static_cast<unsigned long long>(master_semaphore->KnownGpuTick()));
+    }
     ASSERT_MSG(result == vk::Result::eErrorOutOfPoolMemory ||
                    result == vk::Result::eErrorFragmentedPool,
                "Unexpected error during descriptor set allocation: {}", vk::to_string(result));
@@ -158,6 +185,19 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
         pending_pools.pop_front();
 
         const auto reset_result = device.resetDescriptorPool(curr_pool);
+        if (reset_result != vk::Result::eSuccess) {
+            RecordGpuCommandDiagnostic(
+                "descriptor_pool_reset_failed result=%s pool=0x%llx retired_tick=%llu "
+                "current_tick=%llu known_gpu_tick=%llu pending_pools=%zu",
+                vk::to_string(reset_result).c_str(),
+                static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                    static_cast<VkDescriptorPool>(curr_pool))),
+                static_cast<unsigned long long>(tick),
+                static_cast<unsigned long long>(master_semaphore->CurrentTick()),
+                static_cast<unsigned long long>(master_semaphore->KnownGpuTick()),
+                pending_pools.size());
+            DumpGpuCommandDiagnostics("descriptor_pool_reset_failed");
+        }
         ASSERT_MSG(reset_result == vk::Result::eSuccess,
                    "Unexpected error resetting descriptor pool: {}", vk::to_string(reset_result));
     } else {
@@ -167,6 +207,20 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     // Attempt to allocate again with fresh pool.
     alloc_info.descriptorPool = curr_pool;
     result = device.allocateDescriptorSets(&alloc_info, desc_sets.data());
+    if (result != vk::Result::eSuccess) {
+        RecordGpuCommandDiagnostic(
+            "descriptor_alloc_retry_failed result=%s pool=0x%llx set_layout=0x%llx batch=%u "
+            "heap_count=%u pending_pools=%zu current_tick=%llu known_gpu_tick=%llu",
+            vk::to_string(result).c_str(),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkDescriptorPool>(curr_pool))),
+            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(
+                static_cast<VkDescriptorSetLayout>(set_layout))),
+            DescriptorSetBatch, descriptor_heap_count, pending_pools.size(),
+            static_cast<unsigned long long>(master_semaphore->CurrentTick()),
+            static_cast<unsigned long long>(master_semaphore->KnownGpuTick()));
+        DumpGpuCommandDiagnostics("descriptor_alloc_retry_failed");
+    }
     ASSERT_MSG(result == vk::Result::eSuccess,
                "Unexpected error during descriptor set allocation {}", vk::to_string(result));
 
@@ -186,6 +240,20 @@ void DescriptorHeap::CreateDescriptorPool() {
         .pPoolSizes = pool_sizes.data(),
     };
     auto [pool_result, pool] = device.createDescriptorPool(pool_info);
+    if (pool_result != vk::Result::eSuccess) {
+        RecordGpuCommandDiagnostic(
+            "descriptor_pool_create_failed result=%s heap_count=%u pool_sizes=%u "
+            "current_tick=%llu known_gpu_tick=%llu",
+            vk::to_string(pool_result).c_str(), descriptor_heap_count,
+            static_cast<u32>(pool_sizes.size()),
+            master_semaphore != nullptr
+                ? static_cast<unsigned long long>(master_semaphore->CurrentTick())
+                : 0ull,
+            master_semaphore != nullptr
+                ? static_cast<unsigned long long>(master_semaphore->KnownGpuTick())
+                : 0ull);
+        DumpGpuCommandDiagnostics("descriptor_pool_create_failed");
+    }
     ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create descriptor pool: {}",
                vk::to_string(pool_result));
     curr_pool = pool;

@@ -89,6 +89,15 @@ void MasterSemaphore::Refresh() {
                 Common::Log::Flush();
                 std::_Exit(70);
             });
+        } else if (counter_result != vk::Result::eSuccess) {
+            RecordGpuCommandDiagnostic(
+                "master_semaphore_refresh_failed result=%s known_gpu_tick=%llu current_tick=%llu "
+                "last_loaded_gpu_tick=%llu",
+                vk::to_string(counter_result).c_str(),
+                static_cast<unsigned long long>(KnownGpuTick()),
+                static_cast<unsigned long long>(CurrentTick()),
+                static_cast<unsigned long long>(this_tick));
+            DumpGpuCommandDiagnostics("master_semaphore_refresh_failed");
         }
         ASSERT_MSG(counter_result == vk::Result::eSuccess,
                    "Failed to get master semaphore value: {}", vk::to_string(counter_result));
@@ -109,6 +118,9 @@ void MasterSemaphore::Refresh() {
             fmt::format("[MasterSemaphore] known GPU tick {} exceeds logical current_tick {} "
                         "(timeline accounting corruption)",
                         counter, logical));
+        RecordGpuCommandDiagnostic("master_semaphore_gpu_ahead counter=%llu logical=%llu",
+                                   static_cast<unsigned long long>(counter),
+                                   static_cast<unsigned long long>(logical));
     }
 }
 
@@ -139,6 +151,13 @@ void MasterSemaphore::Wait(u64 tick) {
         }
         if (result == vk::Result::eTimeout) {
             ++timeout_count;
+            RecordGpuCommandDiagnostic(
+                "master_semaphore_wait_timeout count=%u target_tick=%llu known_gpu_tick=%llu "
+                "current_tick=%llu timeout_ns=%llu",
+                timeout_count, static_cast<unsigned long long>(tick),
+                static_cast<unsigned long long>(KnownGpuTick()),
+                static_cast<unsigned long long>(CurrentTick()),
+                static_cast<unsigned long long>(timeout));
             LogGpuWaitTimeout("master_semaphore", timeout);
             LOG_ERROR(Render_Vulkan,
                       "GPU timeline semaphore timeout: target_tick={} known_gpu_tick={} current_tick={}",
@@ -152,7 +171,14 @@ void MasterSemaphore::Wait(u64 tick) {
                   "GPU timeline semaphore wait failed: target_tick={} known_gpu_tick={} "
                   "current_tick={} (compare target_tick against FREE reg_tick entries in the dump)",
                   tick, KnownGpuTick(), CurrentTick());
+        RecordGpuCommandDiagnostic(
+            "master_semaphore_wait_failed result=%s target_tick=%llu known_gpu_tick=%llu "
+            "current_tick=%llu",
+            vk::to_string(result).c_str(), static_cast<unsigned long long>(tick),
+            static_cast<unsigned long long>(KnownGpuTick()),
+            static_cast<unsigned long long>(CurrentTick()));
         LogGpuWaitFailure("master_semaphore", result);
+        DumpGpuCommandDiagnostics("master_semaphore_wait_failed");
         break;
     }
     Refresh();
