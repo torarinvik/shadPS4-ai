@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdlib>
 #include <span>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include <magic_enum/magic_enum.hpp>
@@ -141,13 +143,55 @@ Id TypeId(const EmitContext& ctx, IR::Type type) {
     }
 }
 
+// Per-loop iteration cap. A mistranslated GCN loop (e.g. an EXEC-mask exit condition that the
+// structurizer rebuilds wrong) compiles to a SPIR-V loop whose break is never taken, which spins
+// the Apple GPU forever and wedges the whole host at the kernel level (hard reboot). There is no
+// preemption to save us, so we inject a safety counter into every reconstructed loop: it is reset
+// in the preheader, incremented at the latch, and forces the back-edge false once it exceeds the
+// cap. This turns an unrecoverable GPU hang into a (possibly glitched) terminating shader.
+// SHADPS4_SHADER_LOOP_ITERATION_CAP overrides the limit; 0 disables the guard entirely.
+u32 ShaderLoopIterationCap() {
+    static const u32 cap = [] {
+        if (const char* v = std::getenv("SHADPS4_SHADER_LOOP_ITERATION_CAP")) {
+            return static_cast<u32>(std::strtoul(v, nullptr, 10));
+        }
+        return 0x100000u; // 1,048,576 — far above any legitimate real-time shader loop.
+    }();
+    return cap;
+}
+
 void Traverse(EmitContext& ctx, const IR::Program& program) {
+    const u32 loop_cap = ShaderLoopIterationCap();
+    // Assign one Private counter variable per reconstructed loop, keyed by its header block (the
+    // block a Repeat latch branches back to). SPIR-V >= 1.4 requires these globals in the entry
+    // point interface, so route them through interfaces.
+    std::unordered_map<const IR::Block*, Id> loop_counters;
+    if (loop_cap != 0) {
+        for (const IR::AbstractSyntaxNode& node : program.syntax_list) {
+            if (node.type != IR::AbstractSyntaxNode::Type::Repeat) {
+                continue;
+            }
+            const IR::Block* header = node.data.repeat.loop_header;
+            if (loop_counters.contains(header)) {
+                continue;
+            }
+            const Id counter{ctx.DefineVar(ctx.U32[1], spv::StorageClass::Private, ctx.u32_zero_value)};
+            ctx.interfaces.push_back(counter);
+            loop_counters.emplace(header, counter);
+        }
+    }
     IR::Block* current_block{};
     for (const IR::AbstractSyntaxNode& node : program.syntax_list) {
         switch (node.type) {
         case IR::AbstractSyntaxNode::Type::Block: {
             const Id label{node.data.block->Definition<Id>()};
             if (current_block) {
+                // Reset this loop's counter in the preheader (the block falling through into the
+                // header), so re-entered loops start fresh. The back-edge enters via the Repeat
+                // latch instead, bypassing this reset.
+                if (const auto it = loop_counters.find(node.data.block); it != loop_counters.end()) {
+                    ctx.OpStore(it->second, ctx.u32_zero_value);
+                }
                 ctx.OpBranch(label);
             }
             current_block = node.data.block;
@@ -189,6 +233,16 @@ void Traverse(EmitContext& ctx, const IR::Program& program) {
             Id cond{ctx.Def(node.data.repeat.cond)};
             const Id loop_header_label{node.data.repeat.loop_header->Definition<Id>()};
             const Id merge_label{node.data.repeat.merge->Definition<Id>()};
+            // Iteration cap: bump this loop's counter and force the back-edge false once it exceeds
+            // the limit, so a mistranslated never-exiting loop cannot wedge the host GPU.
+            if (const auto it = loop_counters.find(node.data.repeat.loop_header);
+                it != loop_counters.end()) {
+                const Id next{ctx.OpIAdd(ctx.U32[1], ctx.OpLoad(ctx.U32[1], it->second),
+                                         ctx.u32_one_value)};
+                ctx.OpStore(it->second, next);
+                const Id under_cap{ctx.OpULessThan(ctx.U1[1], next, ctx.ConstU32(loop_cap))};
+                cond = ctx.OpLogicalAnd(ctx.U1[1], cond, under_cap);
+            }
             ctx.OpBranchConditional(cond, loop_header_label, merge_label);
             break;
         }
