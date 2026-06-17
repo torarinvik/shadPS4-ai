@@ -240,6 +240,14 @@ s32 ImageInfo::MipOf(const ImageInfo& info) const {
         return -1;
     }
 
+    // A block-compressed image and an uncompressed one must never be treated as mips of each
+    // other: BlockDim()-based matching below can otherwise alias e.g. a 4x4 uncompressed image
+    // onto a compressed parent, producing out-of-bounds layer views that Metal rejects as an
+    // invalid resource (kIOGPU device loss). Same-class compressed-mip matching is preserved.
+    if (props.is_block != info.props.is_block) {
+        return -1;
+    }
+
     if (info.array_mode != array_mode) {
         return -1;
     }
@@ -294,6 +302,12 @@ s32 ImageInfo::MipOf(const ImageInfo& info) const {
 
 s32 ImageInfo::SliceOf(const ImageInfo& info, s32 mip) const {
     if (!IsCompatible(info)) {
+        return -1;
+    }
+
+    // See MipOf: never alias across the block/uncompressed boundary, which would request
+    // out-of-bounds layers and trigger a Metal invalid-resource device loss.
+    if (props.is_block != info.props.is_block) {
         return -1;
     }
 

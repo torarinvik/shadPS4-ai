@@ -100,10 +100,16 @@ static vk::ImageUsageFlags ImageUsageFlags(const Vulkan::Instance* instance,
             }
         }
     } else {
-        // Similarly to above, we specify storage usage. This is typically not supported by
-        // compressed formats, but may be used for uncompressed views. In order to satisfy this,
-        // we will also specify the extended usage bit (forced on at image creation).
-        usage |= vk::ImageUsageFlagBits::eStorage;
+        // Storage usage on a block-compressed image is only used to enable uncompressed views
+        // (via the extended-usage + block-texel-view-compatible bits). On MoltenVK/Metal, BCn
+        // formats do not support MTLTextureUsageShaderWrite, and creating the texture with it
+        // anyway yields a kIOGPU "Invalid Resource" device loss at command-buffer execution.
+        // Only request it when the platform actually supports storage for this format, mirroring
+        // the non-block path above.
+        if (instance->IsFormatSupported(info.pixel_format,
+                                        vk::FormatFeatureFlagBits2::eStorageImage)) {
+            usage |= vk::ImageUsageFlagBits::eStorage;
+        }
     }
 
     return usage;
