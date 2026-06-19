@@ -179,6 +179,13 @@ void Traverse(EmitContext& ctx, const IR::Program& program) {
             ctx.interfaces.push_back(counter);
             loop_counters.emplace(header, counter);
         }
+        // Compile-time telemetry: which shaders contain loops (and how many). Lets us narrow a
+        // GPU-hang culprit to loop-containing shaders without reaching/reproducing the hang.
+        if (!loop_counters.empty()) {
+            LOG_WARNING(Render_Vulkan, "TRACE_SHADER_LOOPS shader={:#x} stage={} loops={} cap={}",
+                        ctx.info.pgm_hash, magic_enum::enum_name(ctx.info.stage),
+                        loop_counters.size(), loop_cap);
+        }
     }
     IR::Block* current_block{};
     for (const IR::AbstractSyntaxNode& node : program.syntax_list) {
